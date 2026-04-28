@@ -540,6 +540,42 @@ app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
 });
 
 
+// =========================================================================
+// RUTAS DEL DASHBOARD (ESTADÍSTICAS)
+// =========================================================================
+app.get('/api/dashboard/:empresa_id', (req, res) => {
+    const { empresa_id } = req.params;
+    const { usuario_id, rol } = req.query;
+
+    let leadsQuery = 'SELECT COUNT(*) as totalLeads, SUM(valor) as totalValor FROM leads WHERE empresa_id = ?';
+    let cotizacionesQuery = 'SELECT COUNT(*) as totalCotizaciones FROM cotizaciones WHERE empresa_id = ?';
+    
+    const params = [empresa_id];
+
+    // Si la consulta la hace un agente, filtramos para que solo sume sus propios datos
+    if (rol === 'agente') {
+        leadsQuery += ' AND usuario_id = ?';
+        cotizacionesQuery += ' AND usuario_id = ?';
+        params.push(usuario_id);
+    }
+
+    // Ejecutamos la consulta de Leads y Valor
+    pool.query(leadsQuery, params, (err1, results1) => {
+        if (err1) return res.status(500).json({ error: err1.message });
+
+        // Ejecutamos la consulta de Cotizaciones
+        pool.query(cotizacionesQuery, params, (err2, results2) => {
+            if (err2) return res.status(500).json({ error: err2.message });
+
+            res.json({
+                totalLeads: results1[0].totalLeads || 0,
+                totalValor: results1[0].totalValor || 0,
+                totalCotizaciones: results2[0].totalCotizaciones || 0
+            });
+        });
+    });
+});
+
 // 10. Encendemos el servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
