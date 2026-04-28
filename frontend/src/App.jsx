@@ -8,6 +8,8 @@ import ResetPasswordView from "./pages/ResetPasswordView";
 import EmpresasView from './pages/EmpresasView';
 import PipelinesView from './pages/PipelinesView'; 
 import CotizadorView from './pages/CotizadorView';
+import DashboardView from './pages/DashboardView';
+
 // Componentes temporales para las otras páginas
 const Placeholder = ({ title }) => (
   <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
@@ -43,15 +45,14 @@ function App() {
     <Router>
       <DashboardLayout>
         <Routes>
-          <Route path="/" element={<Placeholder title="Dashboard" />} />
+          {/* Aquí unificamos la ruta principal para que solo apunte al DashboardView */}
+          <Route path="/" element={<DashboardView />} />
           <Route path="/leads" element={<LeadsView />} />
           <Route path="/agentes" element={<AgentesView />} />
           <Route path="/reset-password" element={<ResetPasswordView />} />
           <Route path="/empresas" element={<EmpresasView />} />
-           <Route path="/cotizador" element={<CotizadorView />} />
-          {/* Aquí está la única y verdadera ruta de pipelines */}
+          <Route path="/cotizador" element={<CotizadorView />} />
           <Route path="/pipelines" element={<PipelinesView />} />
-         
         </Routes>
       </DashboardLayout>
     </Router>
