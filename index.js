@@ -343,21 +343,6 @@ app.put('/api/leads/:id/etapa', (req, res) => {
     });
 });
 
-// 2. RUTA PARA EDITAR INFORMACIÓN (El formulario que acabamos de hacer)
-app.put('/api/leads/:id', (req, res) => {
-    const { id } = req.params;
-    const { nombre, correo, telefono, valor, medio, usuario_id } = req.body;
-    const query = `
-        UPDATE leads 
-        SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ? 
-        WHERE id = ?
-    `;
-    pool.query(query, [nombre, correo, telefono, valor, medio, usuario_id, id], (error) => {
-        if (error) return res.status(500).json({ error: error.message });
-        res.status(200).json({ mensaje: "✅ Lead actualizado" });
-    });
-});
-
 // ==========================================
 // RUTAS DE AUTENTICACIÓN Y RECUPERACIÓN
 // ==========================================
