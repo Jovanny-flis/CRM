@@ -323,9 +323,9 @@ app.put('/api/leads/:id', (req, res) => {
 
 
 
-app.get('/api/medios/:tenant_id', (req, res) => {
-    const { tenant_id } = req.params;
-    pool.query('SELECT * FROM lead_sources WHERE tenant_id = ? ORDER BY nombre ASC', [tenant_id], (error, resultados) => {
+app.get('/api/medios/:empresa_id', (req, res) => {
+    const { empresa_id } = req.params;
+    pool.query('SELECT * FROM lead_sources WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
         res.status(200).json(resultados);
     });
