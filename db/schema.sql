@@ -110,7 +110,7 @@ CREATE TABLE `cotizaciones` (
   `id` varchar(36) NOT NULL,
   `empresa_id` int(11) NOT NULL,
   `lead_id` varchar(36) DEFAULT NULL,
-  `usuario_id` int(11) DEFAULT NULL,
+  `usuario_id` varchar(36) DEFAULT NULL,
   `tipo_activo` varchar(50) NOT NULL,
   `valor_activo` decimal(12,2) NOT NULL,
   `plazo` int(11) NOT NULL,

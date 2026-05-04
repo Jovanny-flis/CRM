@@ -163,6 +163,9 @@ Las versiones indicadas corresponden al entorno de desarrollo conocido al moment
   ```
 4. Configurar variables de entorno backend en `.env` (raiz):
   - Completar `DB_*`, `PORT`, `EMAIL_*`.
+4b. Configurar variables de entorno del frontend en `frontend/.env`:
+  - Copiar `frontend/.env.example` a `frontend/.env`.
+  - Completar `VITE_API_URL` con la URL de la API (por defecto: `http://localhost:3000/api`).
 5. Importar schema SQL en MySQL:
    - Ejecutar `db/schema.sql` (crea la base `flising_crm` si no existe y aplica el DDL).
    - Alternativa: usar el DDL de la seccion 8 como referencia.
@@ -345,7 +348,7 @@ CREATE TABLE `cotizaciones` (
   `id` varchar(36) NOT NULL,
   `empresa_id` int(11) NOT NULL,
   `lead_id` varchar(36) DEFAULT NULL,
-  `usuario_id` int(11) DEFAULT NULL,
+  `usuario_id` varchar(36) DEFAULT NULL,
   `tipo_activo` varchar(50) NOT NULL,
   `valor_activo` decimal(12,2) NOT NULL,
   `plazo` int(11) NOT NULL,
