@@ -8,7 +8,7 @@ Estado actual documentado:
 
 - Backend Node.js + Express en un unico archivo (`index.js`).
 - Frontend React + Vite en `frontend/`.
-- Persistencia en MariaDB sin ORM y sin migraciones versionadas.
+- Persistencia en MariaDB sin ORM; el DDL canonico esta versionado en `db/schema.sql`.
 - Flujo funcional principal activo, con deuda tecnica relevante detallada en este documento.
 
 
@@ -94,10 +94,14 @@ CRM/
 ├─ package.json                 # Dependencias y scripts backend
 ├─ package-lock.json            # Lockfile backend
 ├─ .env                         # Variables locales (no versionado por .gitignore)
+├─ .env.example                 # Plantilla de variables de entorno (raiz)
 ├─ .gitignore                   # Ignora node_modules y .env
+├─ db/
+│  └─ schema.sql                # DDL canonico de la base flising_crm
 └─ frontend/
    ├─ package.json              # Dependencias y scripts frontend
    ├─ package-lock.json         # Lockfile frontend
+   ├─ .env.example              # Plantilla de variables Vite (p. ej. VITE_API_URL)
    ├─ vite.config.js            # Configuracion de Vite
    ├─ tailwind.config.js        # Configuracion de Tailwind
    ├─ postcss.config.js         # Configuracion PostCSS
@@ -110,7 +114,7 @@ CRM/
    └─ src/
       ├─ main.jsx               # Punto de entrada React
       ├─ App.jsx                # Ruteo principal y gate de autenticacion
-      ├─ api.js                 # Instancia Axios (baseURL local)
+      ├─ api.js                 # Instancia Axios (baseURL via VITE_API_URL)
       ├─ index.css              # Estilos globales
       ├─ components/
       │  └─ Sidebar.jsx         # Navegacion lateral por rol
@@ -160,8 +164,8 @@ Las versiones indicadas corresponden al entorno de desarrollo conocido al moment
 4. Configurar variables de entorno backend en `.env` (raiz):
   - Completar `DB_*`, `PORT`, `EMAIL_*`.
 5. Importar schema SQL en MySQL:
-  - Crear base `flising_crm` si no existe.
-  - Ejecutar el DDL completo incluido en este README.
+   - Ejecutar `db/schema.sql` (crea la base `flising_crm` si no existe y aplica el DDL).
+   - Alternativa: usar el DDL de la seccion 8 como referencia.
 6. Crear el primer usuario `super_admin` (manual, sin seed automatico):
   Paso 6a — Crear la empresa base si la base de datos esta vacia:
    Paso 6b — Generar el hash bcrypt de la contrasena (rounds: 10) desde la raiz del proyecto:
@@ -220,15 +224,14 @@ Notas operativas:
   - Campos clave: `id`, `empresa_id`, `lead_id`, `usuario_id`, `tipo_activo`, `plazo`, `pago_inicial`, `renta_mensual_*`.
 - `clientes_globales`: catalogo fiscal global de clientes.
   - Campos clave: `id`, `rfc`, `nombre_fiscal`.
-- `lead_sources`: catalogo de origen de leads.
-  - Campos clave: `id`, `tenant_id`, `nombre`.
-- `tenants` (obsoleta para desarrollo nuevo):
-  - Aun referenciada por FKs desde `usuarios.tenant_id` y `lead_sources.tenant_id`.
+- `lead_sources`: catalogo de origen de leads por empresa.
+  - Campos clave: `id`, `empresa_id`, `nombre`.
 
 ### Relaciones principales
 
 - `empresas (1) -> (N) usuarios` via `usuarios.empresa_id`.
 - `empresas (1) -> (N) pipelines` via `pipelines.empresa_id`.
+- `empresas (1) -> (N) lead_sources` via `lead_sources.empresa_id`.
 - `pipelines (1) -> (N) pipeline_stages` via `pipeline_stages.pipeline_id`.
 - `pipeline_stages (1) -> (N) leads` via `leads.stage_id`.
 - `usuarios (1) -> (N) leads` via `leads.usuario_id`.
@@ -236,18 +239,67 @@ Notas operativas:
 - `leads (0..1) -> (N) cotizaciones` via `cotizaciones.lead_id`.
 - `clientes_globales (1) -> (N) leads` via `leads.cliente_global_id`.
 
-### Nota sobre `tenants` (obsoleta)
+### DDL completo (estado actual)
 
-- `tenants` esta marcada como obsoleta para desarrollo nuevo.
-- Aun mantiene integridad referencial activa.
-- No puede eliminarse sin una migracion que mueva referencias a `empresa_id` y actualice FKs.
-
-### DDL completo (estado provisto)
-
-Expandir DDL SQL completo
+Orden de creacion compatible con las claves foraneas. Copia autoritativa en `db/schema.sql`.
 
 ```sql
--- flising_crm.clientes_globales
+CREATE TABLE `empresas` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `nombre_comercial` varchar(100) NOT NULL,
+  `rfc` varchar(20) DEFAULT NULL,
+  `direccion` text DEFAULT NULL,
+  `telefono` varchar(20) DEFAULT NULL,
+  `correo` varchar(100) DEFAULT NULL,
+  `color_principal` varchar(7) DEFAULT '#2563eb',
+  `color_secundario` varchar(7) DEFAULT '#64748b',
+  `logo_url` varchar(255) DEFAULT NULL,
+  `plan_suscripcion` enum('gratis','pro','unlimited') DEFAULT 'gratis',
+  `fecha_creacion` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `usuarios` (
+  `id` varchar(36) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `email` varchar(150) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `empresa_id` int(11) DEFAULT NULL,
+  `rol` enum('super_admin','admin_empresa','supervisor','agente') DEFAULT 'agente',
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  `supervisor_id` varchar(36) DEFAULT NULL,
+  `reset_token` varchar(255) DEFAULT NULL,
+  `reset_token_expira` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`),
+  KEY `fk_supervisor` (`supervisor_id`),
+  KEY `fk_usuario_empresa` (`empresa_id`),
+  CONSTRAINT `fk_supervisor` FOREIGN KEY (`supervisor_id`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_usuario_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `pipelines` (
+  `id` varchar(36) NOT NULL,
+  `empresa_id` int(11) DEFAULT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `clave` varchar(50) NOT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `empresa_id` (`empresa_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `pipeline_stages` (
+  `id` varchar(36) NOT NULL,
+  `pipeline_id` varchar(36) NOT NULL,
+  `nombre_etapa` varchar(100) NOT NULL,
+  `orden` int(11) NOT NULL,
+  `color_hex` varchar(7) DEFAULT '#CCCCCC',
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `pipeline_id` (`pipeline_id`),
+  CONSTRAINT `pipeline_stages_ibfk_1` FOREIGN KEY (`pipeline_id`) REFERENCES `pipelines` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `clientes_globales` (
   `id` varchar(36) NOT NULL,
   `rfc` varchar(20) DEFAULT NULL,
@@ -257,7 +309,38 @@ CREATE TABLE `clientes_globales` (
   UNIQUE KEY `rfc` (`rfc`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- flising_crm.cotizaciones
+CREATE TABLE `lead_sources` (
+  `id` varchar(36) NOT NULL,
+  `empresa_id` int(11) DEFAULT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `empresa_id` (`empresa_id`),
+  CONSTRAINT `fk_lead_sources_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `leads` (
+  `id` varchar(36) NOT NULL,
+  `empresa_id` int(11) DEFAULT NULL,
+  `usuario_id` varchar(36) NOT NULL,
+  `stage_id` varchar(36) NOT NULL,
+  `cliente_global_id` varchar(36) DEFAULT NULL,
+  `nombre` varchar(150) NOT NULL,
+  `correo` varchar(150) DEFAULT NULL,
+  `telefono` varchar(50) DEFAULT NULL,
+  `valor` decimal(10,2) DEFAULT 0.00,
+  `medio` varchar(100) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `empresa_id` (`empresa_id`),
+  KEY `usuario_id` (`usuario_id`),
+  KEY `stage_id` (`stage_id`),
+  KEY `cliente_global_id` (`cliente_global_id`),
+  CONSTRAINT `leads_ibfk_2` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`id`),
+  CONSTRAINT `leads_ibfk_3` FOREIGN KEY (`stage_id`) REFERENCES `pipeline_stages` (`id`),
+  CONSTRAINT `leads_ibfk_4` FOREIGN KEY (`cliente_global_id`) REFERENCES `clientes_globales` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `cotizaciones` (
   `id` varchar(36) NOT NULL,
   `empresa_id` int(11) NOT NULL,
@@ -274,120 +357,6 @@ CREATE TABLE `cotizaciones` (
   `renta_mensual_con_iva` decimal(12,2) NOT NULL,
   `fecha_creacion` timestamp NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.empresas
-CREATE TABLE `empresas` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `nombre_comercial` varchar(100) NOT NULL,
-  `rfc` varchar(20) DEFAULT NULL,
-  `direccion` text DEFAULT NULL,
-  `telefono` varchar(20) DEFAULT NULL,
-  `correo` varchar(100) DEFAULT NULL,
-  `color_principal` varchar(7) DEFAULT '#2563eb',
-  `color_secundario` varchar(7) DEFAULT '#64748b',
-  `logo_url` varchar(255) DEFAULT NULL,
-  `plan_suscripcion` enum('gratis','pro','unlimited') DEFAULT 'gratis',
-  `fecha_creacion` timestamp NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.pipelines
-CREATE TABLE `pipelines` (
-  `id` varchar(36) NOT NULL,
-  `empresa_id` int(11) DEFAULT NULL,
-  `nombre` varchar(100) NOT NULL,
-  `clave` varchar(50) NOT NULL,
-  `created_at` timestamp NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `tenant_id` (`empresa_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.tenants (OBSOLETA — no usar para desarrollo nuevo)
-CREATE TABLE `tenants` (
-  `id` varchar(36) NOT NULL,
-  `nombre_comercial` varchar(255) NOT NULL,
-  `rfc_empresa` varchar(20) DEFAULT NULL,
-  `plan_suscripcion` varchar(50) DEFAULT 'gratis',
-  `fecha_registro` timestamp NULL DEFAULT current_timestamp(),
-  `activo` tinyint(1) DEFAULT 1,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `rfc_empresa` (`rfc_empresa`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.lead_sources
-CREATE TABLE `lead_sources` (
-  `id` varchar(36) NOT NULL,
-  `tenant_id` varchar(36) DEFAULT NULL,
-  `nombre` varchar(100) NOT NULL,
-  `created_at` timestamp NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `tenant_id` (`tenant_id`),
-  CONSTRAINT `lead_sources_ibfk_1` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.pipeline_stages
-CREATE TABLE `pipeline_stages` (
-  `id` varchar(36) NOT NULL,
-  `pipeline_id` varchar(36) NOT NULL,
-  `nombre_etapa` varchar(100) NOT NULL,
-  `orden` int(11) NOT NULL,
-  `color_hex` varchar(7) DEFAULT '#CCCCCC',
-  `created_at` timestamp NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `pipeline_id` (`pipeline_id`),
-  CONSTRAINT `pipeline_stages_ibfk_1` FOREIGN KEY (`pipeline_id`)
-    REFERENCES `pipelines` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.usuarios
-CREATE TABLE `usuarios` (
-  `id` varchar(36) NOT NULL,
-  `tenant_id` varchar(36) DEFAULT NULL,
-  `nombre` varchar(100) NOT NULL,
-  `email` varchar(150) NOT NULL,
-  `password_hash` varchar(255) NOT NULL,
-  `empresa_id` int(11) DEFAULT NULL,
-  `rol` enum('super_admin','admin_empresa','supervisor','agente') DEFAULT 'agente',
-  `created_at` timestamp NULL DEFAULT current_timestamp(),
-  `supervisor_id` varchar(36) DEFAULT NULL,
-  `reset_token` varchar(255) DEFAULT NULL,
-  `reset_token_expira` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `email` (`email`),
-  KEY `tenant_id` (`tenant_id`),
-  KEY `fk_supervisor` (`supervisor_id`),
-  KEY `fk_usuario_empresa` (`empresa_id`),
-  CONSTRAINT `fk_supervisor` FOREIGN KEY (`supervisor_id`)
-    REFERENCES `usuarios` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_usuario_empresa` FOREIGN KEY (`empresa_id`)
-    REFERENCES `empresas` (`id`),
-  CONSTRAINT `usuarios_ibfk_1` FOREIGN KEY (`tenant_id`)
-    REFERENCES `tenants` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- flising_crm.leads
-CREATE TABLE `leads` (
-  `id` varchar(36) NOT NULL,
-  `empresa_id` int(11) DEFAULT NULL,
-  `usuario_id` varchar(36) NOT NULL,
-  `stage_id` varchar(36) NOT NULL,
-  `cliente_global_id` varchar(36) DEFAULT NULL,
-  `nombre` varchar(150) NOT NULL,
-  `correo` varchar(150) DEFAULT NULL,
-  `telefono` varchar(50) DEFAULT NULL,
-  `valor` decimal(10,2) DEFAULT 0.00,
-  `medio` varchar(100) DEFAULT NULL,
-  `created_at` timestamp NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `tenant_id` (`empresa_id`),
-  KEY `usuario_id` (`usuario_id`),
-  KEY `stage_id` (`stage_id`),
-  KEY `cliente_global_id` (`cliente_global_id`),
-  CONSTRAINT `leads_ibfk_2` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`id`),
-  CONSTRAINT `leads_ibfk_3` FOREIGN KEY (`stage_id`) REFERENCES `pipeline_stages` (`id`),
-  CONSTRAINT `leads_ibfk_4` FOREIGN KEY (`cliente_global_id`)
-    REFERENCES `clientes_globales` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -452,10 +421,7 @@ Base URL: `http://localhost:3000/api`
 | POST   | `/leads`             | Crea lead                                  |
 | PUT    | `/leads/:id`         | Actualiza lead                             |
 | PUT    | `/leads/:id/etapa`   | Mueve lead de etapa                        |
-| GET    | `/medios/:tenant_id` | Lista fuentes de lead por empresa (legacy) |
-
-
-> El endpoint `/medios/:tenant_id` usa internamente la tabla `tenants`, que esta marcada como obsoleta. No usar como referencia para desarrollo nuevo. Pendiente de migracion a `empresa_id`.
+| GET    | `/medios/:empresa_id` | Lista fuentes de lead (`lead_sources`) por empresa |
 
 ### Cotizador
 
@@ -490,15 +456,13 @@ Nota critica:
 
 | Area          | Problema                                                                                                                                                                 | Severidad |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| Base de datos | Tabla `tenants` obsoleta con foreign keys activas desde `usuarios.tenant_id` y `lead_sources.tenant_id`. No puede eliminarse sin migrar esas referencias a `empresa_id`. | Alta      |
-| Base de datos | `lead_sources.tenant_id` deberia apuntar a `empresas.id`, no a `tenants.id`.                                                                                             | Alta      |
-| Base de datos | Sin migraciones versionadas. El schema no es reproducible automaticamente.                                                                                               | Alta      |
+| Base de datos | Sin herramienta de migraciones incrementales (Flyway/Liquibase, etc.); el DDL base esta versionado en `db/schema.sql`.                                                      | Media     |
 | Backend       | Todo el backend esta en un solo archivo (`index.js`). Sin separacion de capas ni controladores.                                                                          | Media     |
 | Backend       | CORS abierto (`origin: '*'`).                                                                                                                                            | Media     |
 | Backend       | `NODE_TLS_REJECT_UNAUTHORIZED` forzado a `'0'` en runtime.                                                                                                               | Media     |
 | Backend       | Sin middleware de autorizacion por rol en API.                                                                                                                           | Media     |
 | Backend       | Variables SMTP no incluidas en `.env` actual del repositorio.                                                                                                            | Media     |
-| Frontend      | URLs de API hardcodeadas a localhost en multiples archivos.                                                                                                              | Media     |
+| Frontend      | Posibles URLs de API residuales fuera de `VITE_API_URL` en `api.js`; conviene auditar el resto del codigo.                                                                | Baja      |
 | Frontend      | 21 errores activos de ESLint.                                                                                                                                            | Baja      |
 | General       | Sin tests automatizados.                                                                                                                                                 | Media     |
 | General       | Sin CI/CD.                                                                                                                                                               | Baja      |
@@ -511,15 +475,13 @@ Nota critica:
 1. Integrar Firebase Auth y Firebase Admin SDK para login y asignación de custom claims de rol.
 2. Reemplazar el gate de localStorage en frontend y el CORS abierto en backend por validación de token en cada endpoint.
 3. Retirar `NODE_TLS_REJECT_UNAUTHORIZED='0'` y configurar TLS correctamente.
-4. Definir y ejecutar plan de migracion para eliminar dependencia funcional de `tenants`.
-5. Versionar esquema con migraciones (herramienta a definir) para hacer reproducible la BD.
+4. Definir herramienta y flujo de migraciones incrementales sobre el DDL base en `db/schema.sql`.
 
 ### Importante
 
 1. Separar backend por capas (rutas/controladores/servicios/repositorios).
-2. Unificar configuracion de API frontend via variables de entorno (evitar hardcode localhost).
-3. Corregir errores de ESLint activos y dejar lint en verde.
-4. Documentar y automatizar seed inicial (`super_admin` + empresa base).
+2. Corregir errores de ESLint activos y dejar lint en verde.
+3. Documentar y automatizar seed inicial (`super_admin` + empresa base).
 
 ### Deseable
 
