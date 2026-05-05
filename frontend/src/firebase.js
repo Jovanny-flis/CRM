@@ -1,14 +1,14 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 
-// Tus claves secretas de Firebase
+// Tus claves secretas de Firebase ahora se leen del archivo oculto .env
 const firebaseConfig = {
-  apiKey: "AIzaSyAFJeLMNxApJcdPLXnGDZx6Zcj9KDxCXbg",
-  authDomain: "crm-flising.firebaseapp.com",
-  projectId: "crm-flising",
-  storageBucket: "crm-flising.firebasestorage.app",
-  messagingSenderId: "242858564964",
-  appId: "1:242858564964:web:382e57ac51c16a7db52e71"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Inicializamos Firebase
