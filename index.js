@@ -9,6 +9,17 @@ const bcrypt = require('bcrypt');
 const app = express();
 const nodemailer = require('nodemailer');
 
+// --- INICIALIZAR FIREBASE ADMIN ---
+const admin = require('firebase-admin');
+const serviceAccount = require('./firebase-key.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+// ----------------------------------
+
+
+
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
 app.use(cors({
     origin: '*',
@@ -76,56 +87,123 @@ app.get('/api/usuarios/empresa/:empresa_id', (req, res) => {
 });
 
 // 3. Crear nuevo usuario (Agente, Supervisor o Admin)
+// 3. Crear nuevo usuario (Agente, Supervisor o Admin)
 app.post('/api/usuarios', async (req, res) => {
     const { nombre, email, password_hash, rol, supervisor_id, empresa_id } = req.body;
     
     try {
-        // Mantenemos tu excelente estándar de seguridad con Bcrypt
+        // Si no envían contraseña desde el front, ponemos una temporal segura por defecto (Firebase exige min 6 caracteres)
+        const passwordDefinitiva = password_hash || '123456';
+        
+        // 1. Creamos al usuario en Firebase (La nube de Google)
+        const firebaseUser = await admin.auth().createUser({
+            email: email,
+            password: passwordDefinitiva,
+            displayName: nombre,
+        });
+
+        // 2. Encriptamos la contraseña para mantener tu estándar de seguridad en MySQL
         const salt = await bcrypt.genSalt(10);
-        // Si no mandan contraseña, asignamos '123456' por defecto
-        const hashedPassword = await bcrypt.hash(password_hash || '123456', salt);
+        const hashedPassword = await bcrypt.hash(passwordDefinitiva, salt);
         const supId = supervisor_id ? supervisor_id : null;
 
+        // 3. Guardamos en tu base de datos MySQL, ¡incluyendo el nuevo UID de Firebase!
         const query = `
-            INSERT INTO usuarios (id, nombre, email, password_hash, rol, supervisor_id, empresa_id) 
-            VALUES (UUID(), ?, ?, ?, ?, ?, ?)
+            INSERT INTO usuarios (id, nombre, email, password_hash, rol, supervisor_id, empresa_id, firebase_uid) 
+            VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?)
         `;
         
-        pool.query(query, [nombre, email, hashedPassword, rol, supId, empresa_id], (err, result) => {
+        pool.query(query, [nombre, email, hashedPassword, rol, supId, empresa_id, firebaseUser.uid], (err, result) => {
             if (err) {
-                console.error("❌ Error al crear usuario:", err.sqlMessage);
+                console.error("❌ Error en MySQL al crear usuario:", err.sqlMessage);
+                // Si falla MySQL, deberíamos borrarlo de Firebase para no dejar "basura", pero por ahora mandamos el error
                 return res.status(500).json({ error: err.sqlMessage });
             }
-            res.status(201).json({ mensaje: "Usuario creado con éxito" });
+            res.status(201).json({ mensaje: "Usuario creado con éxito en Firebase y MySQL" });
         });
+
     } catch (e) {
-        res.status(500).json({ error: "Error en el proceso de seguridad" });
+        console.error("❌ Error al crear cuenta en Firebase:", e.message);
+        if (e.code === 'auth/email-already-exists') {
+            return res.status(400).json({ error: "Este correo ya está registrado en el sistema." });
+        }
+        res.status(500).json({ error: "Error en el proceso de seguridad en la nube." });
     }
 });
 
 // 4. Editar usuario existente
+// 4. Editar usuario existente
 app.put('/api/usuarios/:id', (req, res) => {
     const { id } = req.params;
+    // Si tu formulario también envía una nueva contraseña, asegúrate de recibirla aquí (ej. password)
     const { nombre, email, rol, supervisor_id, empresa_id } = req.body;
     const supId = supervisor_id ? supervisor_id : null;
 
-    const query = `
-        UPDATE usuarios SET nombre = ?, email = ?, rol = ?, supervisor_id = ?, empresa_id = ? 
-        WHERE id = ?
-    `;
-    
-    pool.query(query, [nombre, email, rol, supId, empresa_id, id], (err) => {
-        if (err) return res.status(500).json({ error: err.sqlMessage });
-        res.json({ mensaje: "Usuario actualizado" });
+    // 1. Primero buscamos el firebase_uid del usuario en tu BD
+    pool.query('SELECT firebase_uid FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error al buscar usuario" });
+        if (resultados.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        const firebase_uid = resultados[0].firebase_uid;
+
+        try {
+            // 2. Si el usuario existe en Firebase, le actualizamos el correo en la nube
+            if (firebase_uid && email) {
+                await admin.auth().updateUser(firebase_uid, {
+                    email: email,
+                    displayName: nombre
+                });
+            }
+
+            // 3. Ahora actualizamos el resto de los datos en tu MySQL
+            const query = `
+                UPDATE usuarios SET nombre = ?, email = ?, rol = ?, supervisor_id = ?, empresa_id = ? 
+                WHERE id = ?
+            `;
+            
+            pool.query(query, [nombre, email, rol, supId, empresa_id, id], (errUpdate) => {
+                if (errUpdate) return res.status(500).json({ error: errUpdate.sqlMessage });
+                res.json({ mensaje: "Usuario actualizado en Firebase y BD local" });
+            });
+
+        } catch (error) {
+            console.error("❌ Error al actualizar en Firebase:", error);
+            if (error.code === 'auth/email-already-exists') {
+                return res.status(400).json({ error: "Ese correo ya está siendo usado por otro usuario." });
+            }
+            res.status(500).json({ error: "Error al sincronizar con la nube." });
+        }
     });
 });
 
 // 5. Eliminar usuario
 app.delete('/api/usuarios/:id', (req, res) => {
     const { id } = req.params;
-    pool.query('DELETE FROM usuarios WHERE id = ?', [id], (err) => {
-        if (err) return res.status(500).json({ error: "No se puede eliminar porque tiene datos vinculados" });
-        res.json({ mensaje: "Usuario eliminado" });
+
+    // 1. Necesitamos su firebase_uid para borrarlo de Google primero
+    pool.query('SELECT firebase_uid FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error al buscar usuario" });
+        if (resultados.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        const firebase_uid = resultados[0].firebase_uid;
+
+        try {
+            // 2. Si tiene cuenta en la nube, la fulminamos
+            if (firebase_uid) {
+                await admin.auth().deleteUser(firebase_uid);
+            }
+
+            // 3. Finalmente, lo borramos de tu base de datos MySQL
+            pool.query('DELETE FROM usuarios WHERE id = ?', [id], (errDelete) => {
+                // Si da error aquí, es porque el usuario ya tiene cotizaciones o leads a su nombre
+                if (errDelete) return res.status(500).json({ error: "No se puede eliminar porque tiene datos vinculados." });
+                res.json({ mensaje: "Usuario eliminado del sistema completo" });
+            });
+
+        } catch (error) {
+            console.error("❌ Error al eliminar de Firebase:", error);
+            res.status(500).json({ error: "Error al eliminar la credencial en la nube." });
+        }
     });
 });
 
@@ -362,24 +440,39 @@ app.put('/api/leads/:id', (req, res) => {
 // RUTAS DE AUTENTICACIÓN Y RECUPERACIÓN
 // ==========================================
 
-app.post('/api/login', (req, res) => {
-    const { email, password } = req.body;
-    const query = 'SELECT * FROM usuarios WHERE email = ?';
+// ==========================================
+// RUTAS DE AUTENTICACIÓN Y PUENTE FIREBASE
+// ==========================================
+
+app.post('/api/login/firebase', (req, res) => {
+    const { uid, email } = req.body;
+
+    // Buscamos al usuario por su UID de Firebase, o por su correo (para usuarios viejos)
+    const queryBuscar = 'SELECT * FROM usuarios WHERE firebase_uid = ? OR email = ? LIMIT 1';
     
-    pool.query(query, [email], async (err, resultados) => {
-        if (err) return res.status(500).json({ error: err.sqlMessage });
-        if (resultados.length === 0) return res.status(401).json({ error: "Correo o contraseña incorrectos" });
+    pool.query(queryBuscar, [uid, email], (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error en la base de datos al verificar usuario" });
+        
+        // Si no existe ni el correo ni el UID, lo rechazamos
+        if (resultados.length === 0) {
+            return res.status(403).json({ error: "Tu cuenta no está registrada en el CRM. Habla con tu administrador." });
+        }
 
         const usuario = resultados[0];
-        try {
-            const passwordValida = await bcrypt.compare(password, usuario.password_hash);
-            if (!passwordValida) return res.status(401).json({ error: "Correo o contraseña incorrectos" });
-            
-            delete usuario.password_hash;
-            res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
-        } catch (error) {
-            res.status(500).json({ error: "Error al validar credenciales" });
+
+        // EL AUTOVINCULADOR: Si el usuario es viejo y no tenía su UID, se lo guardamos para siempre
+        if (!usuario.firebase_uid) {
+            pool.query('UPDATE usuarios SET firebase_uid = ? WHERE id = ?', [uid, usuario.id], (errAct) => {
+                if (errAct) console.error("❌ Error vinculando UID en BD:", errAct);
+            });
         }
+
+        // Por seguridad, le borramos la contraseña encriptada vieja antes de mandarlo a React
+        delete usuario.password_hash;
+        delete usuario.reset_token;
+
+        // Le enviamos a React el perfil oficial sacado de MySQL
+        res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
     });
 });
 

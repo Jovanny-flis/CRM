@@ -1,34 +1,59 @@
 import { useState } from 'react';
-import api from '../api'; // Ajusta la ruta si es necesario
+import { auth } from '../firebase'; // Importamos tu configuración de Firebase
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import api from '../api';
 
 function LoginView({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [mensajeExito, setMensajeExito] = useState(''); // Nuevo estado para mensajes de éxito
+  const [mensajeExito, setMensajeExito] = useState(''); 
   const [cargando, setCargando] = useState(false);
-  const [cargandoRecuperacion, setCargandoRecuperacion] = useState(false); // Para el botón de olvido
+  const [cargandoRecuperacion, setCargandoRecuperacion] = useState(false); 
 
-  const handleSubmit = (e) => {
+const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setMensajeExito('');
     setCargando(true);
 
-    api.post('/login', { email, password })
-      .then(res => {
-        setCargando(false);
-        const usuarioLogueado = res.data.usuario;
-        localStorage.setItem('usuarioCRM', JSON.stringify(usuarioLogueado));
-        if (onLogin) onLogin(usuarioLogueado);
-      })
-      .catch(err => {
-        setCargando(false);
-        setError(err.response?.data?.error || "Error al conectar con el servidor");
+    try {
+      // 1. Iniciamos sesión con Firebase (El guardia de seguridad)
+      const credenciales = await signInWithEmailAndPassword(auth, email, password);
+      const usuarioFirebase = credenciales.user;
+
+      // 2. Cruzamos el puente hacia MySQL (Buscamos tu perfil real)
+      const respuestaBD = await api.post('/login/firebase', {
+        uid: usuarioFirebase.uid,
+        email: usuarioFirebase.email
       });
+
+      // 3. Obtenemos tus datos oficiales (Rol, Empresa, Nombre, etc.)
+      const usuarioOficial = respuestaBD.data.usuario;
+
+      // 4. Guardamos sesión y te dejamos entrar al CRM
+      localStorage.setItem('usuarioCRM', JSON.stringify(usuarioOficial));
+      if (onLogin) onLogin(usuarioOficial);
+
+    } catch (err) {
+      console.error(err);
+      
+      // Manejo de errores combinados (Firebase o Nuestro Servidor)
+      if (err.response?.status === 403) {
+        setError(err.response.data.error); // Error si no existe en MySQL
+      } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('Correo o contraseña incorrectos.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('Demasiados intentos. Intenta más tarde.');
+      } else {
+        setError('Error al conectar con el servidor.');
+      }
+    } finally {
+      setCargando(false);
+    }
   };
 
-  // Nueva función para solicitar recuperación de contraseña
+  // Función actualizada para usar el sistema de correos de Firebase
   const handleOlvidePassword = async () => {
     if (!email) {
       setError('Por favor, ingresa tu correo electrónico arriba para enviarte el enlace de recuperación.');
@@ -41,10 +66,18 @@ function LoginView({ onLogin }) {
     setCargandoRecuperacion(true);
 
     try {
-      const res = await api.post('/olvide-password', { email });
-      setMensajeExito(res.data.mensaje);
+      // Firebase envía el correo automáticamente
+      await sendPasswordResetEmail(auth, email);
+      setMensajeExito('¡Listo! Te hemos enviado un correo con el enlace para restablecer tu contraseña. (Revisa también tu bandeja de SPAM)');
     } catch (err) {
-      setError(err.response?.data?.error || "Error al solicitar la recuperación");
+      console.error("Error de recuperación:", err.code);
+      if (err.code === 'auth/user-not-found') {
+        setError('No existe ninguna cuenta registrada con este correo.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('El formato del correo no es válido.');
+      } else {
+        setError("Error al solicitar la recuperación. Intenta más tarde.");
+      }
     } finally {
       setCargandoRecuperacion(false);
     }
