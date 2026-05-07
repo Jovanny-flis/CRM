@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-
+import { auth } from '../firebase'; // Ojo: la ruta '../firebase' depende de dónde tengas guardado tu archivo de configuración de Firebase en el frontend
 const EmpresasView = () => {
     const [empresas, setEmpresas] = useState([]);
     const [editandoId, setEditandoId] = useState(null);
@@ -10,11 +10,55 @@ const EmpresasView = () => {
 
     useEffect(() => { obtenerEmpresas(); }, []);
 
-    const obtenerEmpresas = async () => {
-        const res = await fetch('http://localhost:3000/api/empresas');
+// Asegúrate de tener importado 'auth' desde tu archivo de configuración de Firebase del frontend
+// Ejemplo: import { auth } from '../firebase'; 
+
+const [accesoDenegado, setAccesoDenegado] = useState(false);
+
+const obtenerEmpresas = async () => {
+    try {
+        // 1. Le decimos a React que espere a que Firebase confirme el estado de la sesión
+        const usuarioActual = await new Promise((resolve) => {
+            const unsubscribe = auth.onAuthStateChanged((user) => {
+                unsubscribe(); // Nos desuscribimos inmediatamente para no crear un ciclo
+                resolve(user);
+            });
+        });
+        
+        if (!usuarioActual) {
+            console.log("Definitivamente no hay sesión iniciada en el navegador.");
+            setEmpresas([]);
+            return;
+        }
+
+        // 2. Ahora sí, le pedimos a Firebase que nos genere el "gafete" (Token)
+        const token = await usuarioActual.getIdToken();
+
+        // 3. Hacemos la petición enviando el token en la cabecera
+        const res = await fetch('http://localhost:3000/api/empresas', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}` 
+            }
+        });
+
+        // 4. Si el backend nos rebota (ej. no es super_admin), limpiamos la pantalla
+        if (!res.ok) {
+            console.log("Acceso denegado por el backend.");
+            setEmpresas([]); 
+            setAccesoDenegado(true);
+            return;
+        }
+
+        // Si todo sale bien, guardamos las empresas
         const data = await res.json();
         setEmpresas(Array.isArray(data) ? data : []);
-    };
+
+    } catch (error) {
+        console.error("Error al obtener las empresas:", error);
+        setEmpresas([]);
+    }
+};
 
 const handleSubmit = async (e) => {
     e.preventDefault();
@@ -62,6 +106,19 @@ const handleSubmit = async (e) => {
         setEditandoId(null);
         setFormData({ nombre_comercial: '', rfc: '', direccion: '', telefono: '', correo: '', color_principal: '#2563eb', color_secundario: '#64748b' });
     };
+
+// Si el interruptor de seguridad se activó, mostramos esta pantalla en lugar de la normal
+    if (accesoDenegado) {
+        return (
+            <div style={{ padding: '40px', textAlign: 'center', marginTop: '50px' }}>
+                <h1 style={{ color: '#d9534f', fontSize: '3rem' }}>🚫</h1>
+                <h2>Acceso Restringido</h2>
+                <p>Tu rol actual no tiene permisos para ver o modificar el registro de empresas.</p>
+            </div>
+        );
+    }
+
+
 
     return (
         <div className="p-8 bg-slate-50 min-h-screen">
