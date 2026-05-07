@@ -7,10 +7,12 @@ function LeadsView() {
   const [etapas, setEtapas] = useState([]);
   const [agentes, setAgentes] = useState([]);
   const [cargando, setCargando] = useState(true);
-  
+  // NUEVO: Estado para el filtro inteligente
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [leadEditando, setLeadEditando] = useState(null); // NUEVO: Guarda el ID del lead a editar
   
+// 1. PRIMERO declaramos tu formData que ya tenías
   const [formData, setFormData] = useState({
     nombre: '', 
     correo: '', 
@@ -20,8 +22,14 @@ function LeadsView() {
     usuario_id: ''
   });
 
+  // 2. SEGUNDO leemos quién es el usuario logueado
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id; 
+
+  // 3. TERCERO (Y AQUÍ ESTÁ EL TRUCO), ponemos el filtro porque AHORA SÍ ya sabemos quién es el usuario
+  const [filtroAgente, setFiltroAgente] = useState(
+    usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : ''
+  );
 
   const fetchTablero = () => {
     if (!empresaId) {
@@ -133,8 +141,15 @@ function LeadsView() {
     }
   };
 
-  const obtenerLeadsPorEtapaId = (stageId) => {
-    return leads.filter(lead => lead.stage_id === stageId);
+const obtenerLeadsPorEtapaId = (stageId) => {
+    return leads.filter(lead => {
+      // 1. Verificamos que esté en la columna correcta
+      const esDeLaEtapa = lead.stage_id === stageId;
+      // 2. Verificamos que sea del agente filtrado (o si el filtro está vacío, mostramos todos)
+      const esDelAgente = filtroAgente === '' || lead.usuario_id === filtroAgente;
+      
+      return esDeLaEtapa && esDelAgente;
+    });
   };
 
   const formatoMoneda = (monto) => {
@@ -178,18 +193,41 @@ const handleDragStart = (e, leadId) => {
 
   return (
     <div className="font-sans">
-      <header className="mb-8 flex justify-between items-center">
+<header className="mb-8 flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Tablero de Leads</h1>
           <p className="text-slate-500 mt-1">Gestión de prospectos por equipo</p>
         </div>
-        <button 
-          onClick={() => { setLeadEditando(null); setIsModalOpen(true); }} // Forzamos modo creación
-          disabled={etapas.length === 0}
-          className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
-        >
-          <span className="text-xl">+</span> Nuevo Prospecto
-        </button>
+        
+        <div className="flex items-center gap-4">
+          
+          {/* 🕵🏻‍♂️ INICIO DEL FILTRO (SOLO JEFES) */}
+          {(usuarioLogueado.rol === 'super_admin' || usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
+            <select 
+              value={filtroAgente}
+              onChange={(e) => setFiltroAgente(e.target.value)}
+              className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm"
+            >
+              <option value="">👥 Todos los agentes</option>
+              {agentes.map(agente => (
+                <option key={agente.id} value={agente.id}>
+                  👤 {agente.nombre}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* 🛑 FIN DEL FILTRO */}
+
+          {/* 🟢 EL BOTÓN ESTÁ AFUERA PARA QUE EL AGENTE TAMBIÉN LO VEA */}
+          <button 
+            onClick={() => { setLeadEditando(null); setIsModalOpen(true); }}
+            disabled={etapas.length === 0}
+            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
+          >
+            <span className="text-xl">+</span> Nuevo Prospecto
+          </button>
+
+        </div>
       </header>
 
       {etapas.length === 0 && (

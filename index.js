@@ -8,6 +8,20 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const app = express();
 const nodemailer = require('nodemailer');
+const { verificarToken, revisarRol } = require('./middlewares/authMiddleware');
+const pool = require('./db');
+// --- INICIALIZAR FIREBASE ADMIN ---
+const admin = require('firebase-admin');
+const serviceAccount = require('./firebase-key.json');
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+    // (O lo que sea que tengas adentro de los paréntesis, déjalo igual)
+  });
+}
+
+
 
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
 app.use(cors({
@@ -23,19 +37,7 @@ app.use((req, res, next) => {
 });
 
 // 2. CONFIGURACIÓN DEL POOL (Única y robusta)
-const pool = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-    maxIdle: 10,
-    idleTimeout: 60000,
-    queueLimit: 0,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 0
-});
+
 
 // Verificación de salud del Pool al iniciar
 pool.getConnection((err, connection) => {
@@ -57,7 +59,7 @@ pool.on('error', (err) => {
 // ==========================================
 
 // 1. Obtener TODOS los usuarios (Solo Super Admin)
-app.get('/api/usuarios', (req, res) => {
+app.get('/api/usuarios', verificarToken,(req, res) => {
     const query = 'SELECT id, nombre, email, rol, supervisor_id, empresa_id FROM usuarios';
     pool.query(query, (err, resultados) => {
         if (err) return res.status(500).json({ error: err.sqlMessage });
@@ -66,7 +68,7 @@ app.get('/api/usuarios', (req, res) => {
 });
 
 // 2. Obtener usuarios por empresa (Para los Admin de Empresa)
-app.get('/api/usuarios/empresa/:empresa_id', (req, res) => {
+app.get('/api/usuarios/empresa/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { empresa_id } = req.params;
     const query = 'SELECT id, nombre, email, rol, supervisor_id, empresa_id FROM usuarios WHERE empresa_id = ?';
     pool.query(query, [empresa_id], (err, resultados) => {
@@ -76,56 +78,123 @@ app.get('/api/usuarios/empresa/:empresa_id', (req, res) => {
 });
 
 // 3. Crear nuevo usuario (Agente, Supervisor o Admin)
-app.post('/api/usuarios', async (req, res) => {
+// 3. Crear nuevo usuario (Agente, Supervisor o Admin)
+app.post('/api/usuarios', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa']), async (req, res) => {
     const { nombre, email, password_hash, rol, supervisor_id, empresa_id } = req.body;
     
     try {
-        // Mantenemos tu excelente estándar de seguridad con Bcrypt
+        // Si no envían contraseña desde el front, ponemos una temporal segura por defecto (Firebase exige min 6 caracteres)
+        const passwordDefinitiva = password_hash || '123456';
+        
+        // 1. Creamos al usuario en Firebase (La nube de Google)
+        const firebaseUser = await admin.auth().createUser({
+            email: email,
+            password: passwordDefinitiva,
+            displayName: nombre,
+        });
+
+        // 2. Encriptamos la contraseña para mantener tu estándar de seguridad en MySQL
         const salt = await bcrypt.genSalt(10);
-        // Si no mandan contraseña, asignamos '123456' por defecto
-        const hashedPassword = await bcrypt.hash(password_hash || '123456', salt);
+        const hashedPassword = await bcrypt.hash(passwordDefinitiva, salt);
         const supId = supervisor_id ? supervisor_id : null;
 
+        // 3. Guardamos en tu base de datos MySQL, ¡incluyendo el nuevo UID de Firebase!
         const query = `
-            INSERT INTO usuarios (id, nombre, email, password_hash, rol, supervisor_id, empresa_id) 
-            VALUES (UUID(), ?, ?, ?, ?, ?, ?)
+            INSERT INTO usuarios (id, nombre, email, password_hash, rol, supervisor_id, empresa_id, firebase_uid) 
+            VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?)
         `;
         
-        pool.query(query, [nombre, email, hashedPassword, rol, supId, empresa_id], (err, result) => {
+        pool.query(query, [nombre, email, hashedPassword, rol, supId, empresa_id, firebaseUser.uid], (err, result) => {
             if (err) {
-                console.error("❌ Error al crear usuario:", err.sqlMessage);
+                console.error("❌ Error en MySQL al crear usuario:", err.sqlMessage);
+                // Si falla MySQL, deberíamos borrarlo de Firebase para no dejar "basura", pero por ahora mandamos el error
                 return res.status(500).json({ error: err.sqlMessage });
             }
-            res.status(201).json({ mensaje: "Usuario creado con éxito" });
+            res.status(201).json({ mensaje: "Usuario creado con éxito en Firebase y MySQL" });
         });
+
     } catch (e) {
-        res.status(500).json({ error: "Error en el proceso de seguridad" });
+        console.error("❌ Error al crear cuenta en Firebase:", e.message);
+        if (e.code === 'auth/email-already-exists') {
+            return res.status(400).json({ error: "Este correo ya está registrado en el sistema." });
+        }
+        res.status(500).json({ error: "Error en el proceso de seguridad en la nube." });
     }
 });
 
 // 4. Editar usuario existente
-app.put('/api/usuarios/:id', (req, res) => {
+// 4. Editar usuario existente
+app.put('/api/usuarios/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa']),(req, res) => {
     const { id } = req.params;
+    // Si tu formulario también envía una nueva contraseña, asegúrate de recibirla aquí (ej. password)
     const { nombre, email, rol, supervisor_id, empresa_id } = req.body;
     const supId = supervisor_id ? supervisor_id : null;
 
-    const query = `
-        UPDATE usuarios SET nombre = ?, email = ?, rol = ?, supervisor_id = ?, empresa_id = ? 
-        WHERE id = ?
-    `;
-    
-    pool.query(query, [nombre, email, rol, supId, empresa_id, id], (err) => {
-        if (err) return res.status(500).json({ error: err.sqlMessage });
-        res.json({ mensaje: "Usuario actualizado" });
+    // 1. Primero buscamos el firebase_uid del usuario en tu BD
+    pool.query('SELECT firebase_uid FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error al buscar usuario" });
+        if (resultados.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        const firebase_uid = resultados[0].firebase_uid;
+
+        try {
+            // 2. Si el usuario existe en Firebase, le actualizamos el correo en la nube
+            if (firebase_uid && email) {
+                await admin.auth().updateUser(firebase_uid, {
+                    email: email,
+                    displayName: nombre
+                });
+            }
+
+            // 3. Ahora actualizamos el resto de los datos en tu MySQL
+            const query = `
+                UPDATE usuarios SET nombre = ?, email = ?, rol = ?, supervisor_id = ?, empresa_id = ? 
+                WHERE id = ?
+            `;
+            
+            pool.query(query, [nombre, email, rol, supId, empresa_id, id], (errUpdate) => {
+                if (errUpdate) return res.status(500).json({ error: errUpdate.sqlMessage });
+                res.json({ mensaje: "Usuario actualizado en Firebase y BD local" });
+            });
+
+        } catch (error) {
+            console.error("❌ Error al actualizar en Firebase:", error);
+            if (error.code === 'auth/email-already-exists') {
+                return res.status(400).json({ error: "Ese correo ya está siendo usado por otro usuario." });
+            }
+            res.status(500).json({ error: "Error al sincronizar con la nube." });
+        }
     });
 });
 
 // 5. Eliminar usuario
-app.delete('/api/usuarios/:id', (req, res) => {
+app.delete('/api/usuarios/:id', verificarToken,revisarRol(['super_admin','admin_empresa']),(req, res) => {
     const { id } = req.params;
-    pool.query('DELETE FROM usuarios WHERE id = ?', [id], (err) => {
-        if (err) return res.status(500).json({ error: "No se puede eliminar porque tiene datos vinculados" });
-        res.json({ mensaje: "Usuario eliminado" });
+
+    // 1. Necesitamos su firebase_uid para borrarlo de Google primero
+    pool.query('SELECT firebase_uid FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error al buscar usuario" });
+        if (resultados.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        const firebase_uid = resultados[0].firebase_uid;
+
+        try {
+            // 2. Si tiene cuenta en la nube, la fulminamos
+            if (firebase_uid) {
+                await admin.auth().deleteUser(firebase_uid);
+            }
+
+            // 3. Finalmente, lo borramos de tu base de datos MySQL
+            pool.query('DELETE FROM usuarios WHERE id = ?', [id], (errDelete) => {
+                // Si da error aquí, es porque el usuario ya tiene cotizaciones o leads a su nombre
+                if (errDelete) return res.status(500).json({ error: "No se puede eliminar porque tiene datos vinculados." });
+                res.json({ mensaje: "Usuario eliminado del sistema completo" });
+            });
+
+        } catch (error) {
+            console.error("❌ Error al eliminar de Firebase:", error);
+            res.status(500).json({ error: "Error al eliminar la credencial en la nube." });
+        }
     });
 });
 
@@ -133,7 +202,7 @@ app.delete('/api/usuarios/:id', (req, res) => {
 // RUTAS DE GESTIÓN DE EMPRESAS (Super Admin)
 // ==========================================
 
-app.post('/api/empresas', (req, res) => {
+app.post('/api/empresas', verificarToken,revisarRol(['super_admin']),(req, res) => {
     const { nombre_comercial, rfc, direccion, telefono, correo, color_principal, color_secundario } = req.body;
     if (!nombre_comercial) return res.status(400).json({ error: "Nombre comercial es requerido" });
 
@@ -147,14 +216,14 @@ app.post('/api/empresas', (req, res) => {
     });
 });
 
-app.get('/api/empresas', (req, res) => {
+app.get('/api/empresas', verificarToken, revisarRol(['super_admin']),(req, res) => {
     pool.query('SELECT * FROM empresas ORDER BY nombre_comercial ASC', (err, resultados) => {
         if (err) return res.status(500).json({ error: err.sqlMessage });
         res.status(200).json(resultados);
     });
 });
 
-app.put('/api/empresas/:id', (req, res) => {
+app.put('/api/empresas/:id', verificarToken,revisarRol(['super_admin']),(req, res) => {
     const { id } = req.params;
     const { nombre_comercial, rfc, direccion, telefono, correo, color_principal, color_secundario } = req.body;
     const query = `
@@ -169,7 +238,7 @@ app.put('/api/empresas/:id', (req, res) => {
     });
 });
 
-app.delete('/api/empresas/:id', (req, res) => {
+app.delete('/api/empresas/:id',verificarToken, revisarRol(['super_admin']),(req, res) => {
     const { id } = req.params;
     pool.query('DELETE FROM empresas WHERE id = ?', [id], (err) => {
         if (err) return res.status(500).json({ error: "No se puede eliminar la empresa" });
@@ -177,17 +246,9 @@ app.delete('/api/empresas/:id', (req, res) => {
     });
 });
 
-// ==========================================
-// RUTAS DE PIPELINES Y LEADS
-// ==========================================
-
-
-// ==========================================
-// RUTAS DE PIPELINES Y ETAPAS
-// ==========================================
 
 // Obtener TODOS los Pipelines de una empresa (quitamos el LIMIT 1)
-app.get('/api/pipelines/:empresa_id', (req, res) => {
+app.get('/api/pipelines/:empresa_id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { empresa_id } = req.params;
     pool.query('SELECT * FROM pipelines WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -196,7 +257,7 @@ app.get('/api/pipelines/:empresa_id', (req, res) => {
 });
 
 // Crear un nuevo Pipeline con Nombre y Clave
-app.post('/api/pipelines', (req, res) => {
+app.post('/api/pipelines', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { empresa_id, nombre, clave } = req.body;
     const nuevoPipelineId = crypto.randomUUID();
     const query = `INSERT INTO pipelines (id, empresa_id, nombre, clave) VALUES (?, ?, ?, ?)`;
@@ -211,7 +272,7 @@ app.post('/api/pipelines', (req, res) => {
 });
 
 // NUEVO: Editar nombre y clave de un Pipeline
-app.put('/api/pipelines/:id', (req, res) => {
+app.put('/api/pipelines/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { id } = req.params;
     const { nombre, clave } = req.body;
     const query = `UPDATE pipelines SET nombre = ?, clave = ? WHERE id = ?`;
@@ -224,7 +285,7 @@ app.put('/api/pipelines/:id', (req, res) => {
 
 
 // Agregar una nueva Etapa
-app.post('/api/etapas', (req, res) => {
+app.post('/api/etapas', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { pipeline_id, nombre_etapa, orden, color_hex } = req.body;
     const nuevaEtapaId = crypto.randomUUID();
     const query = `INSERT INTO pipeline_stages (id, pipeline_id, nombre_etapa, orden, color_hex) VALUES (?, ?, ?, ?, ?)`;
@@ -236,7 +297,7 @@ app.post('/api/etapas', (req, res) => {
 });
 
 // Obtener las etapas de un pipeline
-app.get('/api/etapas/:pipeline_id', (req, res) => {
+app.get('/api/etapas/:pipeline_id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { pipeline_id } = req.params;
     pool.query('SELECT * FROM pipeline_stages WHERE pipeline_id = ? ORDER BY orden ASC', [pipeline_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -245,7 +306,7 @@ app.get('/api/etapas/:pipeline_id', (req, res) => {
 });
 
 // NUEVO: Editar el nombre y color de una Etapa existente
-app.put('/api/etapas/:id', (req, res) => {
+app.put('/api/etapas/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { id } = req.params;
     const { nombre_etapa, color_hex } = req.body;
     const query = `UPDATE pipeline_stages SET nombre_etapa = ?, color_hex = ? WHERE id = ?`;
@@ -257,7 +318,7 @@ app.put('/api/etapas/:id', (req, res) => {
 });
 
 // Obtener Leads por empresa
-app.get('/api/leads/:empresa_id', (req, res) => {
+app.get('/api/leads/:empresa_id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { empresa_id } = req.params;
     const query = `
         SELECT l.*, ps.nombre_etapa 
@@ -273,7 +334,7 @@ app.get('/api/leads/:empresa_id', (req, res) => {
 
 // Crear un nuevo prospecto (Lead)
 // Crear un nuevo prospecto (Lead)
-app.post('/api/leads', (req, res) => {
+app.post('/api/leads', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id } = req.body;
     
     console.log("📥 INTENTANDO GUARDAR NUEVO LEAD:", req.body);
@@ -302,7 +363,7 @@ app.post('/api/leads', (req, res) => {
 });
 
 // NUEVO: Editar la información de un Lead (Prospecto)
-app.put('/api/leads/:id', (req, res) => {
+app.put('/api/leads/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
     const { id } = req.params;
     const { nombre, correo, telefono, valor, medio, usuario_id } = req.body;
     
@@ -322,8 +383,7 @@ app.put('/api/leads/:id', (req, res) => {
 });
 
 
-
-app.get('/api/medios/:empresa_id', (req, res) => {
+app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
     const { empresa_id } = req.params;
     pool.query('SELECT * FROM lead_sources WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -332,11 +392,10 @@ app.get('/api/medios/:empresa_id', (req, res) => {
 });
 
 // 1. RUTA PARA MOVER DE ETAPA (Drag & Drop)
-app.put('/api/leads/:id/etapa', (req, res) => {
+app.put('/api/leads/:id/etapa', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
     const { id } = req.params;
     const { stage_id } = req.body;
     const query = 'UPDATE leads SET stage_id = ? WHERE id = ?';
-    
     pool.query(query, [stage_id, id], (error) => {
         if (error) return res.status(500).json({ error: error.message });
         res.status(200).json({ mensaje: '🚀 Lead movido con éxito' });
@@ -347,24 +406,39 @@ app.put('/api/leads/:id/etapa', (req, res) => {
 // RUTAS DE AUTENTICACIÓN Y RECUPERACIÓN
 // ==========================================
 
-app.post('/api/login', (req, res) => {
-    const { email, password } = req.body;
-    const query = 'SELECT * FROM usuarios WHERE email = ?';
+// ==========================================
+// RUTAS DE AUTENTICACIÓN Y PUENTE FIREBASE
+// ==========================================
+
+app.post('/api/login/firebase', (req, res) => {
+    const { uid, email } = req.body;
+
+    // Buscamos al usuario por su UID de Firebase, o por su correo (para usuarios viejos)
+    const queryBuscar = 'SELECT * FROM usuarios WHERE firebase_uid = ? OR email = ? LIMIT 1';
     
-    pool.query(query, [email], async (err, resultados) => {
-        if (err) return res.status(500).json({ error: err.sqlMessage });
-        if (resultados.length === 0) return res.status(401).json({ error: "Correo o contraseña incorrectos" });
+    pool.query(queryBuscar, [uid, email], (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error en la base de datos al verificar usuario" });
+        
+        // Si no existe ni el correo ni el UID, lo rechazamos
+        if (resultados.length === 0) {
+            return res.status(403).json({ error: "Tu cuenta no está registrada en el CRM. Habla con tu administrador." });
+        }
 
         const usuario = resultados[0];
-        try {
-            const passwordValida = await bcrypt.compare(password, usuario.password_hash);
-            if (!passwordValida) return res.status(401).json({ error: "Correo o contraseña incorrectos" });
-            
-            delete usuario.password_hash;
-            res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
-        } catch (error) {
-            res.status(500).json({ error: "Error al validar credenciales" });
+
+        // EL AUTOVINCULADOR: Si el usuario es viejo y no tenía su UID, se lo guardamos para siempre
+        if (!usuario.firebase_uid) {
+            pool.query('UPDATE usuarios SET firebase_uid = ? WHERE id = ?', [uid, usuario.id], (errAct) => {
+                if (errAct) console.error("❌ Error vinculando UID en BD:", errAct);
+            });
         }
+
+        // Por seguridad, le borramos la contraseña encriptada vieja antes de mandarlo a React
+        delete usuario.password_hash;
+        delete usuario.reset_token;
+
+        // Le enviamos a React el perfil oficial sacado de MySQL
+        res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
     });
 });
 
@@ -524,6 +598,51 @@ app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
     });
 });
 
+
+// =========================================================================
+// RUTAS DEL DASHBOARD (ESTADÍSTICAS)
+// =========================================================================
+app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']), (req, res) => {
+    const { empresa_id } = req.params;
+    const { usuario_id, rol } = req.query;
+console.log("🔍 Buscando Dashboard -> Empresa:", empresa_id, "| Usuario ID:", usuario_id, "| Rol:", rol);
+    let leadsQuery = 'SELECT COUNT(*) as totalLeads, SUM(valor) as totalValor FROM leads WHERE empresa_id = ?';
+    let cotizacionesQuery = 'SELECT COUNT(*) as totalCotizaciones FROM cotizaciones WHERE empresa_id = ?';
+    
+    const params = [empresa_id];
+
+    // Si la consulta la hace un agente, filtramos para que solo sume sus propios datos
+    if (rol === 'agente') {
+        leadsQuery += ' AND usuario_id = ?';
+        cotizacionesQuery += ' AND usuario_id = ?';
+        params.push(usuario_id);
+    }
+
+    // Ejecutamos la consulta de Leads y Valor
+    pool.query(leadsQuery, params, (err1, results1) => {
+        if (err1) {
+            console.error("❌ Error en la base de datos (Leads):", err1.message);
+            return res.status(500).json({ error: err1.message });
+        }
+
+        // Ejecutamos la consulta de Cotizaciones
+        pool.query(cotizacionesQuery, params, (err2, results2) => {
+            if (err2) {
+                console.error("❌ Error en la base de datos (Cotizaciones):", err2.message);
+                return res.status(500).json({ error: err2.message });
+            }
+
+            // Nuestro chismoso nos dirá qué encontró exactamente
+            console.log("📊 Datos calculados para el Dashboard:", results1[0], results2[0]);
+
+            res.status(200).json({
+                totalLeads: results1[0].totalLeads || 0,
+                totalValor: results1[0].totalValor || 0,
+                totalCotizaciones: results2[0].totalCotizaciones || 0
+            });
+        });
+    });
+});
 
 // 10. Encendemos el servidor
 const PORT = process.env.PORT || 3000;

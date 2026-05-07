@@ -8,13 +8,25 @@ import ResetPasswordView from "./pages/ResetPasswordView";
 import EmpresasView from './pages/EmpresasView';
 import PipelinesView from './pages/PipelinesView'; 
 import CotizadorView from './pages/CotizadorView';
-// Componentes temporales para las otras páginas
-const Placeholder = ({ title }) => (
-  <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
-    <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
-    <p className="text-slate-500 mt-2">Próximamente: Gestión de {title.toLowerCase()}.</p>
-  </div>
-);
+import DashboardView from './pages/DashboardView';
+
+// 🛡️ NUEVO: ESTE ES NUESTRO CADENERO DEL FRONTEND
+const RutaProtegida = ({ rolesPermitidos, rolActual, children }) => {
+  // Si el rol del usuario no está en la lista VIP, mostramos el mensaje de bloqueo
+  if (!rolesPermitidos.includes(rolActual)) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', marginTop: '100px' }}>
+        <h1 style={{ fontSize: '4rem', marginBottom: '10px' }}>🚫</h1>
+        <h2 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#333' }}>Acceso Restringido</h2>
+        <p style={{ color: '#666', marginTop: '10px' }}>
+          No tienes los permisos necesarios para navegar a esta sección.
+        </p>
+      </div>
+    );
+  }
+  // Si sí tiene permiso, dibujamos la pantalla normal
+  return children;
+};
 
 function App() {
   const [usuario, setUsuario] = useState(null);
@@ -26,7 +38,6 @@ function App() {
     }
   }, []);
 
-  // Si NO hay usuario, solo permitimos Login y Reset Password
   if (!usuario) {
     return (
       <Router>
@@ -38,20 +49,36 @@ function App() {
     );
   }
 
-  // Si SÍ hay usuario, cargamos el CRM completo
   return (
     <Router>
       <DashboardLayout>
         <Routes>
-          <Route path="/" element={<Placeholder title="Dashboard" />} />
+          {/* Rutas para TODOS (Super admin, admin, supervisor, agente) */}
+          <Route path="/" element={<DashboardView />} />
           <Route path="/leads" element={<LeadsView />} />
-          <Route path="/agentes" element={<AgentesView />} />
+          <Route path="/cotizador" element={<CotizadorView />} />
+          
+          {/* 🛡️ Rutas PROTEGIDAS (Ejemplo: Solo admins ven Empresas y Agentes) */}
+          <Route path="/empresas" element={
+            <RutaProtegida rolesPermitidos={['super_admin']} rolActual={usuario.rol}>
+              <EmpresasView />
+            </RutaProtegida>
+          } />
+
+          <Route path="/agentes" element={
+            <RutaProtegida rolesPermitidos={['super_admin', 'admin_empresa', 'supervisor']} rolActual={usuario.rol}>
+              <AgentesView />
+            </RutaProtegida>
+          } />
+
+          {/* Ajusta esta lista según quién quieras que modifique los pipelines */}
+          <Route path="/pipelines" element={
+            <RutaProtegida rolesPermitidos={['super_admin', 'admin_empresa']} rolActual={usuario.rol}>
+              <PipelinesView />
+            </RutaProtegida>
+          } />
+
           <Route path="/reset-password" element={<ResetPasswordView />} />
-          <Route path="/empresas" element={<EmpresasView />} />
-           <Route path="/cotizador" element={<CotizadorView />} />
-          {/* Aquí está la única y verdadera ruta de pipelines */}
-          <Route path="/pipelines" element={<PipelinesView />} />
-         
         </Routes>
       </DashboardLayout>
     </Router>

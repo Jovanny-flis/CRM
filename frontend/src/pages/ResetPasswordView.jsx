@@ -24,7 +24,7 @@ const ResetPasswordView = () => {
             } else {
                 setMensaje({ texto: datos.error, tipo: 'error' });
             }
-        } catch (error) {
+        } catch  {
             setMensaje({ texto: "Error de conexión con el servidor", tipo: 'error' });
         }
     };
