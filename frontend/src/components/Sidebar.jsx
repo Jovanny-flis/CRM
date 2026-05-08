@@ -58,7 +58,7 @@ const Sidebar = () => {
   };
 
   return (
-    <div className="w-64 h-screen bg-white border-r border-slate-200 flex flex-col fixed left-0 top-0">
+    <div className="w-64 h-screen bg-white border-r border-slate-200 flex flex-col fixed left-0 top-0 z-30">
       <div className="p-6 border-b border-slate-100">
         <h2 className="text-xl font-bold text-blue-600 tracking-tighter">FLISING CRM</h2>
       </div>

@@ -449,7 +449,6 @@ Endpoints que reciben `empresa_id` en el body (`POST /api/leads`, `POST /api/pip
 ## 12. Próximos pasos sugeridos
 
 - Valorar custom claims de Firebase si conviene reducir la consulta de perfil que hace `verificarToken` (hoy 1 query/request).
-- Endurecer el cotizador (`/api/cotizaciones*`) si cambia la decisión de producto sobre acceso público.
 - Introducir herramienta o convención de migraciones SQL encima de `db/schema.sql`.
 - Modularizar el backend (rutas, controladores, servicios).
 - Dejar ESLint sin errores y mantener reglas en CI.

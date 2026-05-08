@@ -192,14 +192,14 @@ const handleDragStart = (e, leadId) => {
   );
 
   return (
-    <div className="font-sans">
-<header className="mb-8 flex justify-between items-center">
-        <div>
+    <div className="font-sans w-full max-w-full min-w-0">
+<header className="mb-8 w-full max-w-full min-w-0 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 shrink">
           <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Tablero de Leads</h1>
           <p className="text-slate-500 mt-1">Gestión de prospectos por equipo</p>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end sm:shrink-0">
           
           {/* 🕵🏻‍♂️ INICIO DEL FILTRO (SOLO JEFES) */}
           {(usuarioLogueado.rol === 'super_admin' || usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
@@ -222,7 +222,7 @@ const handleDragStart = (e, leadId) => {
           <button 
             onClick={() => { setLeadEditando(null); setIsModalOpen(true); }}
             disabled={etapas.length === 0}
-            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
+            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 whitespace-nowrap ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
           >
             <span className="text-xl">+</span> Nuevo Prospecto
           </button>
@@ -237,7 +237,7 @@ const handleDragStart = (e, leadId) => {
          </div>
       )}
 
-      <div className="flex gap-6 overflow-x-auto pb-6">
+      <div className="flex gap-6 overflow-x-auto pb-6 w-full max-w-full min-w-0">
         {etapas.map(etapa => {
           const leadsFiltrados = obtenerLeadsPorEtapaId(etapa.id);
           const sumaTotal = leadsFiltrados.reduce((total, lead) => total + parseFloat(lead.valor || 0), 0);
