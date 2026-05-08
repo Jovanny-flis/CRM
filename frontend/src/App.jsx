@@ -4,7 +4,6 @@ import DashboardLayout from './layouts/DashboardLayout';
 import LeadsView from './pages/LeadsView'; 
 import AgentesView from './pages/AgentesView';
 import LoginView from './pages/LoginView'; 
-import ResetPasswordView from "./pages/ResetPasswordView";
 import EmpresasView from './pages/EmpresasView';
 import PipelinesView from './pages/PipelinesView'; 
 import CotizadorView from './pages/CotizadorView';
@@ -42,7 +41,6 @@ function App() {
     return (
       <Router>
         <Routes>
-          <Route path="/reset-password" element={<ResetPasswordView />} />
           <Route path="*" element={<LoginView onLogin={(datosUsuario) => setUsuario(datosUsuario)} />} />
         </Routes>
       </Router>
@@ -78,7 +76,6 @@ function App() {
             </RutaProtegida>
           } />
 
-          <Route path="/reset-password" element={<ResetPasswordView />} />
         </Routes>
       </DashboardLayout>
     </Router>
