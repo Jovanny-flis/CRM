@@ -9,16 +9,8 @@ const app = express();
 const nodemailer = require('nodemailer');
 const { verificarToken, revisarRol } = require('./middlewares/authMiddleware');
 const pool = require('./db');
-// --- INICIALIZAR FIREBASE ADMIN ---
+require('./firebase');
 const admin = require('firebase-admin');
-const serviceAccount = require('./firebase-key.json');
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-    // (O lo que sea que tengas adentro de los paréntesis, déjalo igual)
-  });
-}
 
 
 

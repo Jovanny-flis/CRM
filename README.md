@@ -432,8 +432,6 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 | ---- | -------- |
 | Autorización | `GET /api/usuarios` exige token pero no aplica `revisarRol` en el código actual. |
 | Autorización Firebase | No se usan custom claims en el token; el rol siempre se lee de la BD en el middleware. |
-| Datos / identidad | `usuarios.id` es UUID en MySQL; `firebase_uid` es columna separada (no coincide el PK con el UID de Firebase en el alta vía API). |
-| Duplicación | Inicialización de Firebase Admin tanto en `firebase.js` como en `index.js`. |
 | Arquitectura backend | Toda la API en `index.js` sin capas separadas. |
 | Calidad | ESLint con múltiples errores en `frontend/` y en `index.js`. |
 | Calidad | Sin tests automatizados en scripts del repo. |
