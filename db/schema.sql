@@ -33,8 +33,6 @@ CREATE TABLE `usuarios` (
   `rol` enum('super_admin','admin_empresa','supervisor','agente') DEFAULT 'agente',
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `supervisor_id` varchar(36) DEFAULT NULL,
-  `reset_token` varchar(255) DEFAULT NULL,
-  `reset_token_expira` datetime DEFAULT NULL,
   `firebase_uid` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),

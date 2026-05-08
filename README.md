@@ -33,7 +33,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Cliente DB | mysql2 | ^3.22.1 | Pool y consultas |
 | Hash | bcrypt | ^6.0.0 | Hash de contraseñas en BD |
 | Configuración | dotenv | ^17.4.2 | Variables de entorno |
-| Correo | nodemailer | ^8.0.6 | SMTP para `/api/olvide-password` y envío de enlaces con token en BD |
+| Correo | nodemailer | ^8.0.6 | Integración SMTP del backend |
 | CORS | cors | ^2.8.6 | Orígenes permitidos desde `CORS_ORIGINS` (lista separada por comas) |
 | Firebase Admin | firebase-admin | ^13.8.0 | Verificación de `idToken` y gestión de usuarios en Auth |
 
@@ -126,8 +126,7 @@ CRM/
             ├── EmpresasView.jsx
             ├── LeadsView.jsx
             ├── LoginView.jsx
-            ├── PipelinesView.jsx
-            └── ResetPasswordView.jsx
+        └── PipelinesView.jsx
 ```
 
 La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en la raíz (listado en `.gitignore`; no incluir claves en el repositorio).
@@ -251,8 +250,6 @@ CREATE TABLE `usuarios` (
   `rol` enum('super_admin','admin_empresa','supervisor','agente') DEFAULT 'agente',
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `supervisor_id` varchar(36) DEFAULT NULL,
-  `reset_token` varchar(255) DEFAULT NULL,
-  `reset_token_expira` datetime DEFAULT NULL,
   `firebase_uid` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),
@@ -355,8 +352,6 @@ Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api
 | Método | Endpoint | Protección | Descripción |
 | ------ | -------- | ---------- | ----------- |
 | POST | `/login/firebase` | Ninguna | Recibe `uid` y `email`; responde perfil de `usuarios` y vincula `firebase_uid` si faltaba. |
-| POST | `/olvide-password` | Ninguna | Flujo por token almacenado en BD y envío SMTP. |
-| POST | `/reset-password` | Ninguna | Actualiza contraseña en BD a partir de `token`. |
 
 ### Empresas (`verificarToken` + `revisarRol(['super_admin'])`)
 
@@ -435,26 +430,19 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
 | Área | Problema |
 | ---- | -------- |
-| Recuperación de contraseña | `LoginView` usa recuperación de Firebase; `ResetPasswordView` y `POST /api/reset-password` implementan flujo por token en BD; hay dos mecanismos distintos que pueden desalinearse. |
-| Enlaces en correo | `POST /api/olvide-password` construye enlace con host fijo de desarrollo en el cuerpo del mensaje. |
 | Autorización | `GET /api/usuarios` exige token pero no aplica `revisarRol` en el código actual. |
 | Autorización Firebase | No se usan custom claims en el token; el rol siempre se lee de la BD en el middleware. |
-| Datos / identidad | `usuarios.id` es UUID en MySQL; `firebase_uid` es columna separada (no coincide el PK con el UID de Firebase en el alta vía API). |
-| Duplicación | Inicialización de Firebase Admin tanto en `firebase.js` como en `index.js`. |
 | Arquitectura backend | Toda la API en `index.js` sin capas separadas. |
 | Calidad | ESLint con múltiples errores en `frontend/` y en `index.js`. |
 | Calidad | Sin tests automatizados en scripts del repo. |
 | Operación | Sin pipeline de CI/CD en el repositorio. |
 | UX / datos | Dashboard y vistas asumen `empresa_id` para usuarios de empresa; perfiles sin empresa pueden tener comportamiento limitado. |
-| Código cliente | `ResetPasswordView` llama a la API con URL absoluta fija en lugar de `VITE_API_URL`. |
 
 ---
 
 ## 12. Próximos pasos sugeridos
 
-- Alinear recuperación de contraseña: un solo flujo coherente (Firebase o backend) y enlaces basados en configuración.
 - Revisar `GET /api/usuarios` y el resto de rutas para políticas de rol explícitas; valorar custom claims si conviene reducir lecturas a BD.
-- Sustituir URLs hardcodeadas por variables de entorno en correo y en `ResetPasswordView`.
 - Introducir herramienta o convención de migraciones SQL encima de `db/schema.sql`.
 - Modularizar el backend (rutas, controladores, servicios).
 - Dejar ESLint sin errores y mantener reglas en CI.

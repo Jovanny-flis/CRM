@@ -9,16 +9,8 @@ const app = express();
 const nodemailer = require('nodemailer');
 const { verificarToken, revisarRol } = require('./middlewares/authMiddleware');
 const pool = require('./db');
-// --- INICIALIZAR FIREBASE ADMIN ---
+require('./firebase');
 const admin = require('firebase-admin');
-const serviceAccount = require('./firebase-key.json');
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-    // (O lo que sea que tengas adentro de los paréntesis, déjalo igual)
-  });
-}
 
 
 
@@ -406,10 +398,6 @@ app.put('/api/leads/:id/etapa', verificarToken, revisarRol(['super_admin','super
 });
 
 // ==========================================
-// RUTAS DE AUTENTICACIÓN Y RECUPERACIÓN
-// ==========================================
-
-// ==========================================
 // RUTAS DE AUTENTICACIÓN Y PUENTE FIREBASE
 // ==========================================
 
@@ -438,7 +426,6 @@ app.post('/api/login/firebase', (req, res) => {
 
         // Por seguridad, le borramos la contraseña encriptada vieja antes de mandarlo a React
         delete usuario.password_hash;
-        delete usuario.reset_token;
 
         // Le enviamos a React el perfil oficial sacado de MySQL
         res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
@@ -457,59 +444,6 @@ transporter.verify().then(() => {
     console.log('✅ Cartero SMTP listo para enviar correos seguros');
 }).catch(err => {
     console.log('❌ Error conectando el correo SMTP:', err.message);
-});
-
-app.post('/api/olvide-password', (req, res) => {
-    const { email } = req.body;
-    pool.query('SELECT * FROM usuarios WHERE email = ?', [email], (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error en la base de datos" });
-        if (resultados.length === 0) return res.status(200).json({ mensaje: "Si el correo existe, se ha enviado un enlace." });
-
-        const token = crypto.randomBytes(32).toString('hex');
-        const expira = new Date(Date.now() + 3600000); // 1 hora
-
-        pool.query('UPDATE usuarios SET reset_token = ?, reset_token_expira = ? WHERE email = ?', 
-        [token, expira, email], (err) => {
-            if (err) return res.status(500).json({ error: "Error al generar token" });
-            const enlaceRestablecer = `http://localhost:5173/reset-password?token=${token}`;
-            const mailOptions = {
-                from: `"Soporte CRM" <${process.env.EMAIL_USER}>`,
-                to: email,
-                subject: 'Soporte CRM - Recuperación de Contraseña',
-                html: `
-                    <h2>Recuperación de contraseña</h2>
-                    <p>Has solicitado restablecer tu contraseña en el CRM.</p>
-                    <p>Haz clic en el siguiente enlace para crear una nueva:</p>
-                    <a href="${enlaceRestablecer}" style="padding: 10px 20px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 10px;">Restablecer mi contraseña</a>
-                `
-            };
-            transporter.sendMail(mailOptions, (error) => {
-                if (error) return res.status(500).json({ error: "Error enviando el correo." });
-                res.status(200).json({ mensaje: "Si el correo existe, se ha enviado un enlace." });
-            });
-        });
-    });
-});
-
-app.post('/api/reset-password', async (req, res) => {
-    const { token, nuevaPassword } = req.body;
-    pool.query('SELECT * FROM usuarios WHERE reset_token = ?', [token], async (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error verificando token" });
-        if (resultados.length === 0) return res.status(400).json({ error: "El enlace es inválido o ha caducado" });
-
-        const usuario = resultados[0];
-        try {
-            const salt = await bcrypt.genSalt(10);
-            const passwordHash = await bcrypt.hash(nuevaPassword, salt);
-            pool.query('UPDATE usuarios SET password_hash = ?, reset_token = NULL, reset_token_expira = NULL WHERE id = ?', 
-            [passwordHash, usuario.id], (err) => {
-                if (err) return res.status(500).json({ error: "Error guardando la contraseña" });
-                res.status(200).json({ mensaje: "Contraseña actualizada con éxito" });
-            });
-        } catch (error) {
-            res.status(500).json({ error: "Error al procesar la contraseña" });
-        }
-    });
 });
 
 // ==========================================
