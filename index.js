@@ -7,12 +7,25 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const app = express();
 const nodemailer = require('nodemailer');
-const { verificarToken, revisarRol } = require('./middlewares/authMiddleware');
+const {
+    verificarToken,
+    revisarRol,
+    validarEmpresaParam,
+    validarRecursoEmpresa,
+} = require('./middlewares/authMiddleware');
 const pool = require('./db');
 require('./firebase');
 const admin = require('firebase-admin');
 
-
+// Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
+// super_admin pasa siempre. El resto debe coincidir con su empresa_id.
+const puedeOperarEnEmpresa = (usuarioCRM, empresaIdObjetivo) => {
+    if (!usuarioCRM) return false;
+    if (usuarioCRM.rol === 'super_admin') return true;
+    if (usuarioCRM.empresa_id === null || usuarioCRM.empresa_id === undefined) return false;
+    if (empresaIdObjetivo === null || empresaIdObjetivo === undefined || empresaIdObjetivo === '') return false;
+    return Number(usuarioCRM.empresa_id) === Number(empresaIdObjetivo);
+};
 
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
 const corsOrigins = (process.env.CORS_ORIGINS ?? '')
@@ -54,7 +67,7 @@ pool.on('error', (err) => {
 // ==========================================
 
 // 1. Obtener TODOS los usuarios (Solo Super Admin)
-app.get('/api/usuarios', verificarToken,(req, res) => {
+app.get('/api/usuarios', verificarToken, revisarRol(['super_admin']), (req, res) => {
     const query = 'SELECT id, nombre, email, rol, supervisor_id, empresa_id FROM usuarios';
     pool.query(query, (err, resultados) => {
         if (err) return res.status(500).json({ error: err.sqlMessage });
@@ -63,7 +76,7 @@ app.get('/api/usuarios', verificarToken,(req, res) => {
 });
 
 // 2. Obtener usuarios por empresa (Para los Admin de Empresa)
-app.get('/api/usuarios/empresa/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.get('/api/usuarios/empresa/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
     const query = 'SELECT id, nombre, email, rol, supervisor_id, empresa_id FROM usuarios WHERE empresa_id = ?';
     pool.query(query, [empresa_id], (err, resultados) => {
@@ -73,10 +86,16 @@ app.get('/api/usuarios/empresa/:empresa_id', verificarToken, revisarRol(['super_
 });
 
 // 3. Crear nuevo usuario (Agente, Supervisor o Admin)
-// 3. Crear nuevo usuario (Agente, Supervisor o Admin)
-app.post('/api/usuarios', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa']), async (req, res) => {
+app.post('/api/usuarios', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa']), async (req, res) => {
     const { nombre, email, password_hash, rol, supervisor_id, empresa_id } = req.body;
-    
+
+    if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+        return res.status(403).json({ error: 'No puedes crear usuarios en otra empresa.' });
+    }
+    if (req.usuarioCRM.rol !== 'super_admin' && rol === 'super_admin') {
+        return res.status(403).json({ error: 'No puedes crear usuarios con rol super_admin.' });
+    }
+
     try {
         // Si no envían contraseña desde el front, ponemos una temporal segura por defecto (Firebase exige min 6 caracteres)
         const passwordDefinitiva = password_hash || '123456';
@@ -118,19 +137,28 @@ app.post('/api/usuarios', verificarToken,revisarRol(['super_admin','supervisor',
 });
 
 // 4. Editar usuario existente
-// 4. Editar usuario existente
-app.put('/api/usuarios/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa']),(req, res) => {
+app.put('/api/usuarios/:id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa']), (req, res) => {
     const { id } = req.params;
-    // Si tu formulario también envía una nueva contraseña, asegúrate de recibirla aquí (ej. password)
     const { nombre, email, rol, supervisor_id, empresa_id } = req.body;
     const supId = supervisor_id ? supervisor_id : null;
 
-    // 1. Primero buscamos el firebase_uid del usuario en tu BD
-    pool.query('SELECT firebase_uid FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
+    if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+        return res.status(403).json({ error: 'No puedes asignar el usuario a otra empresa.' });
+    }
+    if (req.usuarioCRM.rol !== 'super_admin' && rol === 'super_admin') {
+        return res.status(403).json({ error: 'No puedes elevar un usuario a super_admin.' });
+    }
+
+    pool.query('SELECT firebase_uid, empresa_id FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
         if (err) return res.status(500).json({ error: "Error al buscar usuario" });
         if (resultados.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
 
         const firebase_uid = resultados[0].firebase_uid;
+        const empresaActual = resultados[0].empresa_id;
+
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, empresaActual)) {
+            return res.status(403).json({ error: 'No tienes acceso a este usuario.' });
+        }
 
         try {
             // 2. Si el usuario existe en Firebase, le actualizamos el correo en la nube
@@ -163,15 +191,22 @@ app.put('/api/usuarios/:id', verificarToken,revisarRol(['super_admin','superviso
 });
 
 // 5. Eliminar usuario
-app.delete('/api/usuarios/:id', verificarToken,revisarRol(['super_admin','admin_empresa']),(req, res) => {
+app.delete('/api/usuarios/:id', verificarToken, revisarRol(['super_admin','admin_empresa']), (req, res) => {
     const { id } = req.params;
 
-    // 1. Necesitamos su firebase_uid para borrarlo de Google primero
-    pool.query('SELECT firebase_uid FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
+    pool.query('SELECT firebase_uid, empresa_id FROM usuarios WHERE id = ?', [id], async (err, resultados) => {
         if (err) return res.status(500).json({ error: "Error al buscar usuario" });
         if (resultados.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
 
         const firebase_uid = resultados[0].firebase_uid;
+        const empresaActual = resultados[0].empresa_id;
+
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, empresaActual)) {
+            return res.status(403).json({ error: 'No tienes acceso a este usuario.' });
+        }
+        if (req.usuarioCRM.id === id) {
+            return res.status(403).json({ error: 'No puedes eliminar tu propio usuario.' });
+        }
 
         try {
             // 2. Si tiene cuenta en la nube, la fulminamos
@@ -243,7 +278,7 @@ app.delete('/api/empresas/:id',verificarToken, revisarRol(['super_admin']),(req,
 
 
 // Obtener TODOS los Pipelines de una empresa (quitamos el LIMIT 1)
-app.get('/api/pipelines/:empresa_id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.get('/api/pipelines/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
     pool.query('SELECT * FROM pipelines WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -252,8 +287,13 @@ app.get('/api/pipelines/:empresa_id', verificarToken,revisarRol(['super_admin','
 });
 
 // Crear un nuevo Pipeline con Nombre y Clave
-app.post('/api/pipelines', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.post('/api/pipelines', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
     const { empresa_id, nombre, clave } = req.body;
+
+    if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+        return res.status(403).json({ error: 'No puedes crear pipelines en otra empresa.' });
+    }
+
     const nuevoPipelineId = crypto.randomUUID();
     const query = `INSERT INTO pipelines (id, empresa_id, nombre, clave) VALUES (?, ?, ?, ?)`;
     
@@ -267,7 +307,11 @@ app.post('/api/pipelines', verificarToken,revisarRol(['super_admin','supervisor'
 });
 
 // NUEVO: Editar nombre y clave de un Pipeline
-app.put('/api/pipelines/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.put('/api/pipelines/:id',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa('SELECT empresa_id FROM pipelines WHERE id = ?'),
+    (req, res) => {
     const { id } = req.params;
     const { nombre, clave } = req.body;
     const query = `UPDATE pipelines SET nombre = ?, clave = ? WHERE id = ?`;
@@ -280,19 +324,36 @@ app.put('/api/pipelines/:id', verificarToken,revisarRol(['super_admin','supervis
 
 
 // Agregar una nueva Etapa
-app.post('/api/etapas', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.post('/api/etapas', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
     const { pipeline_id, nombre_etapa, orden, color_hex } = req.body;
-    const nuevaEtapaId = crypto.randomUUID();
-    const query = `INSERT INTO pipeline_stages (id, pipeline_id, nombre_etapa, orden, color_hex) VALUES (?, ?, ?, ?, ?)`;
-    
-    pool.query(query, [nuevaEtapaId, pipeline_id, nombre_etapa, orden, color_hex || '#CCCCCC'], (error) => {
-        if (error) return res.status(500).json({ error: error.message });
-        res.status(201).json({ mensaje: '✅ Etapa agregada al pipeline', id: nuevaEtapaId });
+
+    if (!pipeline_id) {
+        return res.status(400).json({ error: 'pipeline_id es requerido.' });
+    }
+
+    pool.query('SELECT empresa_id FROM pipelines WHERE id = ?', [pipeline_id], (errPipe, filasPipe) => {
+        if (errPipe) return res.status(500).json({ error: 'Error verificando el pipeline.' });
+        if (filasPipe.length === 0) return res.status(404).json({ error: 'Pipeline no encontrado.' });
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, filasPipe[0].empresa_id)) {
+            return res.status(403).json({ error: 'No tienes acceso a este pipeline.' });
+        }
+
+        const nuevaEtapaId = crypto.randomUUID();
+        const query = `INSERT INTO pipeline_stages (id, pipeline_id, nombre_etapa, orden, color_hex) VALUES (?, ?, ?, ?, ?)`;
+
+        pool.query(query, [nuevaEtapaId, pipeline_id, nombre_etapa, orden, color_hex || '#CCCCCC'], (error) => {
+            if (error) return res.status(500).json({ error: error.message });
+            res.status(201).json({ mensaje: '✅ Etapa agregada al pipeline', id: nuevaEtapaId });
+        });
     });
 });
 
 // Obtener las etapas de un pipeline
-app.get('/api/etapas/:pipeline_id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.get('/api/etapas/:pipeline_id',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa('SELECT empresa_id FROM pipelines WHERE id = ?', 'pipeline_id'),
+    (req, res) => {
     const { pipeline_id } = req.params;
     pool.query('SELECT * FROM pipeline_stages WHERE pipeline_id = ? ORDER BY orden ASC', [pipeline_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -301,7 +362,13 @@ app.get('/api/etapas/:pipeline_id', verificarToken,revisarRol(['super_admin','su
 });
 
 // NUEVO: Editar el nombre y color de una Etapa existente
-app.put('/api/etapas/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.put('/api/etapas/:id',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa(
+        'SELECT p.empresa_id FROM pipeline_stages s JOIN pipelines p ON s.pipeline_id = p.id WHERE s.id = ?'
+    ),
+    (req, res) => {
     const { id } = req.params;
     const { nombre_etapa, color_hex } = req.body;
     const query = `UPDATE pipeline_stages SET nombre_etapa = ?, color_hex = ? WHERE id = ?`;
@@ -313,7 +380,7 @@ app.put('/api/etapas/:id', verificarToken,revisarRol(['super_admin','supervisor'
 });
 
 // Obtener Leads por empresa
-app.get('/api/leads/:empresa_id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.get('/api/leads/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
     const query = `
         SELECT l.*, ps.nombre_etapa 
@@ -328,11 +395,12 @@ app.get('/api/leads/:empresa_id', verificarToken,revisarRol(['super_admin','supe
 });
 
 // Crear un nuevo prospecto (Lead)
-// Crear un nuevo prospecto (Lead)
-app.post('/api/leads', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
     const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id } = req.body;
-    
-    console.log("📥 INTENTANDO GUARDAR NUEVO LEAD:", req.body);
+
+    if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+        return res.status(403).json({ error: 'No puedes crear leads en otra empresa.' });
+    }
 
     const query = `
         INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id) 
@@ -358,7 +426,11 @@ app.post('/api/leads', verificarToken,revisarRol(['super_admin','supervisor','ad
 });
 
 // NUEVO: Editar la información de un Lead (Prospecto)
-app.put('/api/leads/:id', verificarToken,revisarRol(['super_admin','supervisor','admin_empresa','agente']),(req, res) => {
+app.put('/api/leads/:id',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
+    (req, res) => {
     const { id } = req.params;
     const { nombre, correo, telefono, valor, medio, usuario_id } = req.body;
     
@@ -378,7 +450,7 @@ app.put('/api/leads/:id', verificarToken,revisarRol(['super_admin','supervisor',
 });
 
 
-app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
+app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
     pool.query('SELECT * FROM lead_sources WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -387,7 +459,11 @@ app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','su
 });
 
 // 1. RUTA PARA MOVER DE ETAPA (Drag & Drop)
-app.put('/api/leads/:id/etapa', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
+app.put('/api/leads/:id/etapa',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
+    (req, res) => {
     const { id } = req.params;
     const { stage_id } = req.body;
     const query = 'UPDATE leads SET stage_id = ? WHERE id = ?';
@@ -538,20 +614,19 @@ app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
 // =========================================================================
 // RUTAS DEL DASHBOARD (ESTADÍSTICAS)
 // =========================================================================
-app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']), (req, res) => {
+app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
-    const { usuario_id, rol } = req.query;
-console.log("🔍 Buscando Dashboard -> Empresa:", empresa_id, "| Usuario ID:", usuario_id, "| Rol:", rol);
+
     let leadsQuery = 'SELECT COUNT(*) as totalLeads, SUM(valor) as totalValor FROM leads WHERE empresa_id = ?';
     let cotizacionesQuery = 'SELECT COUNT(*) as totalCotizaciones FROM cotizaciones WHERE empresa_id = ?';
-    
+
     const params = [empresa_id];
 
-    // Si la consulta la hace un agente, filtramos para que solo sume sus propios datos
-    if (rol === 'agente') {
+    // Si el usuario autenticado es agente, forzamos el filtro a su propio id (ignoramos query string).
+    if (req.usuarioCRM.rol === 'agente') {
         leadsQuery += ' AND usuario_id = ?';
         cotizacionesQuery += ' AND usuario_id = ?';
-        params.push(usuario_id);
+        params.push(req.usuarioCRM.id);
     }
 
     // Ejecutamos la consulta de Leads y Valor

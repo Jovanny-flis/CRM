@@ -364,34 +364,34 @@ Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api
 
 ### Usuarios
 
-| Método | Endpoint | Roles permitidos (tras token) |
-| ------ | -------- | ----------------------------- |
-| GET | `/usuarios` | Sin `revisarRol` en código (solo token) |
-| GET | `/usuarios/empresa/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` |
-| POST | `/usuarios` | `super_admin`, `supervisor`, `admin_empresa` |
-| PUT | `/usuarios/:id` | `super_admin`, `supervisor`, `admin_empresa` |
-| DELETE | `/usuarios/:id` | `super_admin`, `admin_empresa` |
+| Método | Endpoint | Roles permitidos (tras token) | Aislamiento por empresa |
+| ------ | -------- | ----------------------------- | ----------------------- |
+| GET | `/usuarios` | `super_admin` | N/A (acceso global) |
+| GET | `/usuarios/empresa/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam` |
+| POST | `/usuarios` | `super_admin`, `supervisor`, `admin_empresa` | `empresa_id` del body debe coincidir con el del usuario autenticado; solo `super_admin` puede crear `super_admin` |
+| PUT | `/usuarios/:id` | `super_admin`, `supervisor`, `admin_empresa` | El usuario objetivo y el `empresa_id` enviado deben pertenecer a la empresa del usuario autenticado; solo `super_admin` puede elevar a `super_admin` |
+| DELETE | `/usuarios/:id` | `super_admin`, `admin_empresa` | El usuario objetivo debe pertenecer a la empresa del usuario autenticado; nadie puede borrarse a sí mismo |
 
 ### Pipelines y etapas (`verificarToken` + roles indicados)
 
-| Método | Endpoint | Roles |
-| ------ | -------- | ----- |
-| GET | `/pipelines/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` |
-| POST | `/pipelines` | mismos |
-| PUT | `/pipelines/:id` | mismos |
-| GET | `/etapas/:pipeline_id` | mismos |
-| POST | `/etapas` | mismos |
-| PUT | `/etapas/:id` | mismos |
+| Método | Endpoint | Roles | Aislamiento por empresa |
+| ------ | -------- | ----- | ----------------------- |
+| GET | `/pipelines/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam` |
+| POST | `/pipelines` | mismos | `empresa_id` del body debe coincidir con el del usuario |
+| PUT | `/pipelines/:id` | mismos | `validarRecursoEmpresa` (empresa del pipeline) |
+| GET | `/etapas/:pipeline_id` | mismos | `validarRecursoEmpresa` (empresa del pipeline) |
+| POST | `/etapas` | mismos | El pipeline objetivo debe pertenecer a la empresa del usuario |
+| PUT | `/etapas/:id` | mismos | `validarRecursoEmpresa` (vía JOIN con `pipelines`) |
 
 ### Leads y medios
 
-| Método | Endpoint | Roles |
-| ------ | -------- | ----- |
-| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` |
-| POST | `/leads` | mismos |
-| PUT | `/leads/:id` | mismos |
-| PUT | `/leads/:id/etapa` | mismos |
-| GET | `/medios/:empresa_id` | mismos |
+| Método | Endpoint | Roles | Aislamiento por empresa |
+| ------ | -------- | ----- | ----------------------- |
+| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam` |
+| POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario |
+| PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead) |
+| PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa` (empresa del lead) |
+| GET | `/medios/:empresa_id` | mismos | `validarEmpresaParam` |
 
 ### Cotizador (API pública por decisión de producto)
 
@@ -406,11 +406,11 @@ Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer co
 
 ### Dashboard
 
-| Método | Endpoint | Roles |
-| ------ | -------- | ----- |
-| GET | `/dashboard/:empresa_id` | `super_admin`, `admin_empresa`, `supervisor`, `agente` |
+| Método | Endpoint | Roles | Aislamiento por empresa |
+| ------ | -------- | ----- | ----------------------- |
+| GET | `/dashboard/:empresa_id` | `super_admin`, `admin_empresa`, `supervisor`, `agente` | `validarEmpresaParam` |
 
-Query string usado en el código del frontend: `usuario_id`, `rol` (para acotar datos de `agente`).
+El backend ignora la query string `usuario_id`/`rol`: si el usuario autenticado tiene rol `agente`, el dashboard se filtra contra `req.usuarioCRM.id` para evitar suplantación entre agentes.
 
 ---
 
@@ -418,11 +418,18 @@ Query string usado en el código del frontend: `usuario_id`, `rol` (para acotar 
 
 Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
-**Backend:** Tras `verificarToken` (Firebase ID token), `revisarRol` consulta el `rol` en `usuarios` filtrando por `firebase_uid` del token y compara con la lista permitida en cada ruta.
+**Backend:** Cadena de middlewares en `middlewares/authMiddleware.js`:
 
-**Frontend:** `App.jsx` envuelve rutas en `RutaProtegida` según `usuario.rol`. `Sidebar.jsx` filtra ítems de menú por rol. Tras el login, el perfil se guarda en `localStorage` bajo `usuarioCRM` para hidratar UI y parámetros de consulta; las peticiones autenticadas añaden `Authorization: Bearer` con el token de Firebase vía interceptor en `api.js`.
+1. `verificarToken`: valida la firma del Firebase ID token y carga el perfil CRM (`id`, `rol`, `empresa_id`) en `req.usuarioCRM` con una sola consulta a BD reutilizable por el resto de la cadena.
+2. `revisarRol(rolesPermitidos)`: compara `req.usuarioCRM.rol` contra la lista permitida (sin tocar BD).
+3. `validarEmpresaParam(paramName)`: para rutas con `:empresa_id` en URL, exige que coincida con el `empresa_id` del usuario autenticado. `super_admin` pasa siempre.
+4. `validarRecursoEmpresa(sql, paramName)`: para rutas con `:id` (lead, pipeline, etapa, etc.), ejecuta `sql` para obtener el `empresa_id` real del recurso y lo compara contra el del usuario. `super_admin` pasa siempre.
 
-**Cotizador:** Los endpoints REST del cotizador no requieren autenticación (módulo público en API). La aplicación web sigue mostrando el cotizador solo a usuarios que hayan iniciado sesión en la SPA, pero la API no refuerza el mismo límite en esas rutas.
+Endpoints que reciben `empresa_id` en el body (`POST /api/leads`, `POST /api/pipelines`, `POST /api/usuarios`, `PUT /api/usuarios/:id`) validan en línea con el helper `puedeOperarEnEmpresa` para impedir crear/editar recursos en empresas ajenas.
+
+**Frontend:** `App.jsx` envuelve rutas en `RutaProtegida` según `usuario.rol`. `Sidebar.jsx` filtra ítems de menú por rol. Tras el login, el perfil se guarda en `localStorage` bajo `usuarioCRM` para hidratar UI y parámetros de consulta; las peticiones autenticadas añaden `Authorization: Bearer` con el token de Firebase vía interceptor en `api.js`. **Estas restricciones de UI son meramente cosméticas**: la autoridad real está en el backend.
+
+**Cotizador:** Los endpoints REST del cotizador no requieren autenticación (módulo público en API por decisión de producto). La aplicación web sigue mostrando el cotizador solo a usuarios que hayan iniciado sesión en la SPA, pero la API no refuerza el mismo límite en esas rutas.
 
 ---
 
@@ -430,9 +437,8 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
 | Área | Problema |
 | ---- | -------- |
-| Autorización | `GET /api/usuarios` exige token pero no aplica `revisarRol` en el código actual. |
-| Autorización Firebase | No se usan custom claims en el token; el rol siempre se lee de la BD en el middleware. |
-| Arquitectura backend | Toda la API en `index.js` sin capas separadas. |
+| Autorización Firebase | No se usan custom claims en el token; el rol y `empresa_id` se leen de la BD en `verificarToken` (una sola query reutilizada por la cadena). Optimización pendiente, no es un riesgo de seguridad. |
+| Arquitectura backend | Toda la API en `index.js` sin capas separadas (rutas/controladores/servicios). |
 | Calidad | ESLint con múltiples errores en `frontend/` y en `index.js`. |
 | Calidad | Sin tests automatizados en scripts del repo. |
 | Operación | Sin pipeline de CI/CD en el repositorio. |
@@ -442,7 +448,8 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
 ## 12. Próximos pasos sugeridos
 
-- Revisar `GET /api/usuarios` y el resto de rutas para políticas de rol explícitas; valorar custom claims si conviene reducir lecturas a BD.
+- Valorar custom claims de Firebase si conviene reducir la consulta de perfil que hace `verificarToken` (hoy 1 query/request).
+- Endurecer el cotizador (`/api/cotizaciones*`) si cambia la decisión de producto sobre acceso público.
 - Introducir herramienta o convención de migraciones SQL encima de `db/schema.sql`.
 - Modularizar el backend (rutas, controladores, servicios).
 - Dejar ESLint sin errores y mantener reglas en CI.
