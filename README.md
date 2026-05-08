@@ -34,7 +34,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Hash | bcrypt | ^6.0.0 | Hash de contraseñas en BD |
 | Configuración | dotenv | ^17.4.2 | Variables de entorno |
 | Correo | nodemailer | ^8.0.6 | SMTP para `/api/olvide-password` y envío de enlaces con token en BD |
-| CORS | cors | ^2.8.6 | Cabeceras y orígenes |
+| CORS | cors | ^2.8.6 | Orígenes permitidos desde `CORS_ORIGINS` (lista separada por comas) |
 | Firebase Admin | firebase-admin | ^13.8.0 | Verificación de `idToken` y gestión de usuarios en Auth |
 
 ### Frontend
@@ -65,6 +65,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
                              │ Authorization: Bearer <idToken> en rutas protegidas
 ┌────────────────────────────▼────────────────────────────────┐
 │  Express (index.js) + middlewares/authMiddleware.js            │
+│  CORS: solo orígenes listados en CORS_ORIGINS                 │
 │  verificarToken (Firebase ID token) + revisarRol (rol en BD) │
 │  Rutas /api/cotizaciones* sin middleware de token (públicas) │
 └──────────────┬──────────────────────────────┬─────────────────┘
@@ -159,7 +160,7 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
    ```
 
 5. Variables de entorno:
-   - Copiar `.env.example` a `.env` en la raíz y completar `DB_*`, `PORT` y `EMAIL_*` si se usan las rutas SMTP del backend.
+   - Copiar `.env.example` a `.env` en la raíz y completar `DB_*`, `PORT`, `CORS_ORIGINS` y `EMAIL_*` si se usan las rutas SMTP del backend.
    - Copiar `frontend/.env.example` a `frontend/.env` y completar `VITE_API_URL` y las variables `VITE_FIREBASE_*`.
 
 6. Crear la base ejecutando `db/schema.sql` en el servidor SQL (crea `flising_crm` y tablas).
@@ -176,7 +177,7 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
    cd frontend && npm run dev
    ```
 
-10. Por defecto el frontend de desarrollo suele atender en el puerto `5173` y la API en `PORT` (por defecto `3000`). La URL base de la API debe coincidir con `VITE_API_URL`.
+10. Por defecto el frontend de desarrollo suele atender en el puerto `5173` y la API en `PORT` (por defecto `3000`). La URL base de la API debe coincidir con `VITE_API_URL`, y el origen del navegador (p. ej. `http://localhost:5173`) debe figurar en `CORS_ORIGINS`.
 
 ---
 
@@ -195,8 +196,8 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 | `EMAIL_PORT` | Puerto SMTP |
 | `EMAIL_USER` | Usuario SMTP |
 | `EMAIL_PASS` | Contraseña SMTP |
-
-`FRONTEND_BASE_URL` aparece documentada en `.env.example` para enlaces absolutos; el código actual del backend aún puede usar URLs fijas para flujos concretos (ver Deuda técnica).
+| `CORS_ORIGINS` | Orígenes del navegador autorizados para llamar a la API, separados por comas. Si está vacía o ausente, no se admite ningún origen en peticiones cross-origin. |
+| `FRONTEND_BASE_URL` | Base del frontend para enlaces absolutos (documentada en `.env.example`); el código del backend puede seguir usando URLs fijas en algunos flujos (ver Deuda técnica). |
 
 ### Frontend (`frontend/.env`)
 
@@ -434,9 +435,6 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
 | Área | Problema |
 | ---- | -------- |
-| Seguridad / red | CORS configurado con `origin: '*'` en `index.js`. |
-| TLS | `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'` en el proceso de Node. |
-| Correo / TLS | `nodemailer` usa `tls: { rejectUnauthorized: false }` y el arranque depende de variables SMTP correctas. |
 | Recuperación de contraseña | `LoginView` usa recuperación de Firebase; `ResetPasswordView` y `POST /api/reset-password` implementan flujo por token en BD; hay dos mecanismos distintos que pueden desalinearse. |
 | Enlaces en correo | `POST /api/olvide-password` construye enlace con host fijo de desarrollo en el cuerpo del mensaje. |
 | Autorización | `GET /api/usuarios` exige token pero no aplica `revisarRol` en el código actual. |
@@ -454,7 +452,6 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
 ## 12. Próximos pasos sugeridos
 
-- Endurecer CORS y TLS (variables de entorno por entorno, sin relajar verificación global).
 - Alinear recuperación de contraseña: un solo flujo coherente (Firebase o backend) y enlaces basados en configuración.
 - Revisar `GET /api/usuarios` y el resto de rutas para políticas de rol explícitas; valorar custom claims si conviene reducir lecturas a BD.
 - Sustituir URLs hardcodeadas por variables de entorno en correo y en `ResetPasswordView`.
