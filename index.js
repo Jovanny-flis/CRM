@@ -1,6 +1,5 @@
 // 1. Importamos las herramientas
 require('dotenv').config();
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const cors = require('cors');
 const express = require('express');
 const mysql = require('mysql2');
@@ -24,8 +23,12 @@ if (!admin.apps.length) {
 
 
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
+const corsOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 app.use(cors({
-    origin: '*',
+    origin: corsOrigins.length === 0 ? false : corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -447,8 +450,7 @@ const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
     port: process.env.EMAIL_PORT,
     secure: true,
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-    tls: { rejectUnauthorized: false }
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
 
 transporter.verify().then(() => {
