@@ -35,6 +35,7 @@ CREATE TABLE `usuarios` (
   `supervisor_id` varchar(36) DEFAULT NULL,
   `reset_token` varchar(255) DEFAULT NULL,
   `reset_token_expira` datetime DEFAULT NULL,
+  `firebase_uid` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),
   KEY `fk_supervisor` (`supervisor_id`),

@@ -1,250 +1,229 @@
 # CRM
 
-## 1. Descripcion general
+## 1. Descripción general
 
-CRM es el sistema interno para operar el pipeline comercial de forma multiempresa (SaaS interno). El sistema centraliza captacion de clientes, gestion de leads, configuracion de embudos de venta y cotizacion de arrendamiento financiero.
+CRM es el sistema interno para operar el pipeline comercial de forma multiempresa. Centraliza captación de clientes, gestión de leads, configuración de embudos de venta y cotización de arrendamiento financiero.
 
-Estado actual documentado:
-
-- Backend Node.js + Express en un unico archivo (`index.js`).
+- Backend Node.js + Express (`index.js`), persistencia con MariaDB/MySQL vía `mysql2` y pool en `db.js`.
 - Frontend React + Vite en `frontend/`.
-- Persistencia en MariaDB sin ORM; el DDL canonico esta versionado en `db/schema.sql`.
-- Flujo funcional principal activo, con deuda tecnica relevante detallada en este documento.
+- Autenticación de usuarios con Firebase Auth (cliente) y Firebase Admin (servidor); perfil operativo y roles en base de datos.
+- DDL versionado en `db/schema.sql`.
 
+| Módulo             | Descripción |
+| ------------------ | ----------- |
+| Autenticación      | Inicio de sesión con correo y contraseña vía Firebase; trazo del perfil CRM con `POST /api/login/firebase`. Recuperación de contraseña desde el login mediante `sendPasswordResetEmail` de Firebase. |
+| Empresas           | CRUD de empresas (alcance `super_admin` en API). |
+| Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa. |
+| Pipelines y etapas | Embudos y etapas por empresa. |
+| Leads              | Prospectos, medios (`lead_sources`) y cambio de etapa. |
+| Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). |
+| Cotizador          | Cálculo de arrendamiento, guardado de cotizaciones e historial. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
 
-| Modulo             | Descripcion                                                        |
-| ------------------ | ------------------------------------------------------------------ |
-| Autenticacion      | Login con correo/contrasena y recuperacion de contrasena por SMTP. |
-| Empresas           | CRUD de empresas para el modelo multiempresa.                      |
-| Usuarios y agentes | Alta, edicion, baja y jerarquia operativa de usuarios por rol.     |
-| Pipelines y etapas | Definicion de embudos comerciales y etapas por empresa.            |
-| Leads              | Gestion de prospectos y movimiento entre etapas (drag and drop).   |
-| Cotizador          | Calculo de arrendamiento, guardado de cotizaciones e historial.    |
+---
 
-
-## 2. Stack tecnologico
+## 2. Stack tecnológico
 
 ### Backend
 
-
-| Capa                   | Tecnologia      | Version            | Proposito                           |
-| ---------------------- | --------------- | ------------------ | ----------------------------------- |
-| Runtime                | Node.js         | 24.15.0 (ver nota) | Ejecutar API backend                |
-| Framework              | Express         | 5.2.1              | API REST y middlewares              |
-| Base de datos          | MySQL / MariaDB | 10.4.32 (ver nota) | Persistencia transaccional          |
-| Cliente DB             | mysql2          | 3.22.1             | Conexion y queries SQL              |
-| Seguridad credenciales | bcrypt          | 6.0.0              | Hash de contrasenas                 |
-| Configuracion          | dotenv          | 17.4.2             | Carga de variables de entorno       |
-| Correo                 | nodemailer      | 8.0.6              | Recuperacion de contrasena via SMTP |
-| CORS                   | cors            | 2.8.6              | Politica CORS para API              |
-
-
-> Las versiones de Node.js y MariaDB quedan pendientes de confirmar antes de configurar entornos nuevos.
+| Capa | Tecnología | Versión (package.json) | Propósito |
+| ---- | ---------- | ---------------------- | --------- |
+| Runtime | Node.js | (compatible con el equipo; no fijado en el repo) | Ejecutar la API |
+| Framework | express | ^5.2.1 | API REST |
+| Base de datos | MySQL / MariaDB | (servidor según entorno) | Persistencia |
+| Cliente DB | mysql2 | ^3.22.1 | Pool y consultas |
+| Hash | bcrypt | ^6.0.0 | Hash de contraseñas en BD |
+| Configuración | dotenv | ^17.4.2 | Variables de entorno |
+| Correo | nodemailer | ^8.0.6 | SMTP para `/api/olvide-password` y envío de enlaces con token en BD |
+| CORS | cors | ^2.8.6 | Cabeceras y orígenes |
+| Firebase Admin | firebase-admin | ^13.8.0 | Verificación de `idToken` y gestión de usuarios en Auth |
 
 ### Frontend
 
+| Capa | Tecnología | Versión (package.json) | Propósito |
+| ---- | ---------- | ---------------------- | --------- |
+| UI | react / react-dom | ^19.2.4 | Interfaz |
+| Build | vite | ^8.0.4 | Dev y build |
+| Estilos | tailwindcss | ^4.2.2 | Utilidades CSS |
+| PostCSS | @tailwindcss/postcss, postcss, autoprefixer | ^4.2.2 / ^8.5.10 / ^10.5.0 | Pipeline |
+| Plugins Vite | @tailwindcss/vite, @vitejs/plugin-react | ^4.2.2 / ^6.0.1 | Integración |
+| Ruteo | react-router-dom | ^7.14.1 | SPA |
+| HTTP | axios | ^1.15.0 | Cliente API |
+| Auth cliente | firebase | ^12.12.1 | `signInWithEmailAndPassword`, token, recuperación |
+| Iconos | lucide-react | ^1.8.0 | Iconografía |
+| Lint | eslint y plugins | ^9.39.4 (frontend) | Calidad estática |
 
-| Capa         | Tecnologia       | Version | Proposito                       |
-| ------------ | ---------------- | ------- | ------------------------------- |
-| Framework UI | React            | 19.2.4  | Interfaz y estado de aplicacion |
-| Build tool   | Vite             | 8.0.4   | Dev server y build frontend     |
-| Ruteo        | React Router DOM | 7.14.1  | Navegacion SPA                  |
-| HTTP client  | Axios            | 1.15.0  | Consumo de API backend          |
-| UI/CSS       | TailwindCSS      | 4.2.2   | Estilos utilitarios             |
-| Linting      | ESLint           | 9.39.4  | Validacion estatica de codigo   |
-
+---
 
 ## 3. Arquitectura
 
-Diagrama ASCII de la arquitectura actual:
-
 ```text
-┌─────────────────────────────────────────────────────────┐
-│                    Navegador del usuario                │
-│                  React 19 + Vite (frontend/)           │
-│  App.jsx + pages/* + Sidebar + DashboardLayout         │
-└──────────────────────────┬──────────────────────────────┘
-                           │ HTTP (Axios/fetch)
-                           │ baseURL: http://localhost:3000/api
-┌──────────────────────────▼──────────────────────────────┐
-│                  API REST Express (index.js)           │
-│  Auth, usuarios, empresas, pipelines, leads, cotizador │
-│  Sin separacion por capas (todo en un archivo)         │
-└───────────────┬──────────────────────────┬──────────────┘
-                │                          │
-                │ SQL (mysql2)             │ SMTP (nodemailer)
-┌───────────────▼───────────────┐   ┌──────▼────────────────┐
-│   MariaDB/MySQL (flising_crm) │   │     Servidor SMTP      │
-│ tablas: usuarios, leads, etc. │   │ recuperacion password  │
-└───────────────────────────────┘   └────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Navegador — React + Vite (frontend/)                       │
+│  Rutas protegidas por rol en App.jsx; token Firebase en API │
+└────────────────────────────┬────────────────────────────────┘
+                             │ HTTPS/HTTP — Axios (VITE_API_URL)
+                             │ Authorization: Bearer <idToken> en rutas protegidas
+┌────────────────────────────▼────────────────────────────────┐
+│  Express (index.js) + middlewares/authMiddleware.js            │
+│  verificarToken (Firebase ID token) + revisarRol (rol en BD) │
+│  Rutas /api/cotizaciones* sin middleware de token (públicas) │
+└──────────────┬──────────────────────────────┬─────────────────┘
+               │ mysql2 pool (db.js)            │ Firebase Admin (firebase.js + credencial)
+               │                                │ nodemailer (SMTP)
+┌──────────────▼──────────────┐    ┌────────────▼──────────────┐
+│  MariaDB/MySQL (flising_crm) │    │  Firebase Auth / SMTP     │
+└────────────────────────────┘    └───────────────────────────┘
 ```
 
-Comunicacion actual:
-
-- El frontend consume la API por `http://localhost:3000/api`.
-- El backend ejecuta SQL directo con `mysql2` contra `flising_crm`.
-- El flujo de recuperacion usa `nodemailer` con variables `EMAIL_*`.
-- No existe gateway/API proxy, ni microservicios, ni colas.
+---
 
 ## 4. Estructura del repositorio
 
 ```text
 CRM/
-├─ index.js                     # Servidor Express completo (backend monolitico en 1 archivo)
-├─ package.json                 # Dependencias y scripts backend
-├─ package-lock.json            # Lockfile backend
-├─ .env                         # Variables locales (no versionado por .gitignore)
-├─ .env.example                 # Plantilla de variables de entorno (raiz)
-├─ .gitignore                   # Ignora node_modules y .env
-├─ db/
-│  └─ schema.sql                # DDL canonico de la base flising_crm
-└─ frontend/
-   ├─ package.json              # Dependencias y scripts frontend
-   ├─ package-lock.json         # Lockfile frontend
-   ├─ .env.example              # Plantilla de variables Vite (p. ej. VITE_API_URL)
-   ├─ vite.config.js            # Configuracion de Vite
-   ├─ tailwind.config.js        # Configuracion de Tailwind
-   ├─ postcss.config.js         # Configuracion PostCSS
-   ├─ eslint.config.js          # Reglas de lint frontend
-   ├─ index.html                # HTML base de la SPA
-   ├─ README.md                 # Artefacto de plantilla Vite — pendiente de eliminar del repo
-   ├─ public/
-   │  ├─ favicon.svg            # Favicon
-   │  └─ icons.svg              # Iconos estaticos
-   └─ src/
-      ├─ main.jsx               # Punto de entrada React
-      ├─ App.jsx                # Ruteo principal y gate de autenticacion
-      ├─ api.js                 # Instancia Axios (baseURL via VITE_API_URL)
-      ├─ index.css              # Estilos globales
-      ├─ components/
-      │  └─ Sidebar.jsx         # Navegacion lateral por rol
-      ├─ layouts/
-      │  └─ DashboardLayout.jsx # Layout principal autenticado
-      ├─ pages/
-      │  ├─ LoginView.jsx       # Login y solicitud de recuperacion
-      │  ├─ ResetPasswordView.jsx # Cambio de contrasena via token
-      │  ├─ LeadsView.jsx       # Tablero de leads por etapas
-      │  ├─ AgentesView.jsx     # CRUD de usuarios/agentes
-      │  ├─ EmpresasView.jsx    # CRUD de empresas
-      │  ├─ PipelinesView.jsx   # Configuracion de embudos y etapas
-      │  └─ CotizadorView.jsx   # Cotizador financiero e historial
-      └─ assets/
-         ├─ hero.png            # Recurso grafico
-         ├─ react.svg           # Recurso plantilla
-         └─ vite.svg            # Recurso plantilla
+├── db.js
+├── db/
+│   └── schema.sql
+├── eslint.config.mjs
+├── firebase.js
+├── index.js
+├── middlewares/
+│   └── authMiddleware.js
+├── package.json
+├── package-lock.json
+├── .env.example
+├── .gitignore
+├── plan-produccion-crm.md
+├── README.md
+└── frontend/
+    ├── eslint.config.js
+    ├── index.html
+    ├── package.json
+    ├── package-lock.json
+    ├── postcss.config.js
+    ├── public/
+    │   └── icons.svg
+    ├── tailwind.config.js
+    ├── vite.config.js
+    ├── .env.example
+    ├── .gitignore
+    ├── README.md
+    └── src/
+        ├── api.js
+        ├── App.jsx
+        ├── firebase.js
+        ├── index.css
+        ├── main.jsx
+        ├── components/
+        │   └── Sidebar.jsx
+        ├── layouts/
+        │   └── DashboardLayout.jsx
+        └── pages/
+            ├── AgentesView.jsx
+            ├── CotizadorView.jsx
+            ├── DashboardView.jsx
+            ├── EmpresasView.jsx
+            ├── LeadsView.jsx
+            ├── LoginView.jsx
+            ├── PipelinesView.jsx
+            └── ResetPasswordView.jsx
 ```
+
+La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en la raíz (listado en `.gitignore`; no incluir claves en el repositorio).
+
+---
 
 ## 5. Requisitos previos
 
-Las versiones indicadas corresponden al entorno de desarrollo conocido al momento de esta documentacion. Confirmar versiones optimas antes de configurar un entorno nuevo.
+- Node.js y npm instalados (versiones acordadas con el equipo).
+- Servidor MySQL o MariaDB.
+- Proyecto Firebase (Auth habilitado, aplicación web, cuenta de servicio para Admin SDK).
+- Opcional: SMTP para rutas que envían correo desde el backend.
 
-- Node.js: v24.15.0 (entorno conocido; confirmar version minima con el equipo).
-- npm: v11.12.1 (incluido con Node.js).
-- MySQL o MariaDB: MariaDB 10.4.32 via XAMPP (entorno conocido; confirmar compatibilidad con el equipo).
-- Acceso SMTP valido para el flujo de recuperacion de contrasena.
-- Git para clonar el repositorio.
+---
 
-## 6. Configuracion local
+## 6. Configuración local
 
-1. Clonar repositorio:
-  ```bash
-   git clone <url-del-repo>
-   cd CRM
-  ```
-2. Instalar dependencias backend:
-  ```bash
+1. Clonar el repositorio y entrar al directorio del proyecto.
+
+2. Instalar dependencias del backend:
+   ```bash
    npm install
-  ```
-3. Instalar dependencias frontend:
-  ```bash
-   cd frontend
-   npm install
-   cd ..
-  ```
-4. Configurar variables de entorno backend en `.env` (raiz):
-  - Completar `DB_*`, `PORT`, `EMAIL_*`.
-4b. Configurar variables de entorno del frontend en `frontend/.env`:
-  - Copiar `frontend/.env.example` a `frontend/.env`.
-  - Completar `VITE_API_URL` con la URL de la API (por defecto: `http://localhost:3000/api`).
-5. Importar schema SQL en MySQL:
-   - Ejecutar `db/schema.sql` (crea la base `flising_crm` si no existe y aplica el DDL).
-   - Alternativa: usar el DDL de la seccion 8 como referencia.
-6. Crear el primer usuario `super_admin` (manual, sin seed automatico):
-  Paso 6a — Crear la empresa base si la base de datos esta vacia:
-   Paso 6b — Generar el hash bcrypt de la contrasena (rounds: 10) desde la raiz del proyecto:
-   Paso 6c — Insertar el usuario `super_admin` con el hash generado:
-7. Arrancar backend (desde raiz):
-  ```bash
+   ```
+
+3. Colocar la cuenta de servicio de Firebase en `firebase-key.json` (raíz).
+
+4. Instalar dependencias del frontend:
+   ```bash
+   cd frontend && npm install && cd ..
+   ```
+
+5. Variables de entorno:
+   - Copiar `.env.example` a `.env` en la raíz y completar `DB_*`, `PORT` y `EMAIL_*` si se usan las rutas SMTP del backend.
+   - Copiar `frontend/.env.example` a `frontend/.env` y completar `VITE_API_URL` y las variables `VITE_FIREBASE_*`.
+
+6. Crear la base ejecutando `db/schema.sql` en el servidor SQL (crea `flising_crm` y tablas).
+
+7. Dar de alta usuarios en Firebase Auth y filas en `usuarios` con `firebase_uid` coherente (el alta vía API crea ambos). Para un `super_admin` inicial, seguir el bloque comentado al final de `db/schema.sql` y la consola de Firebase según el procedimiento del equipo.
+
+8. Arrancar el backend:
+   ```bash
    node index.js
-  ```
-8. Arrancar frontend (en otra terminal):
-  ```bash
-   cd frontend
-   npm run dev
-  ```
-9. Abrir frontend:
-  - URL por defecto Vite: `http://localhost:5173`
-  - API esperada: `http://localhost:3000/api`
+   ```
+
+9. Arrancar el frontend:
+   ```bash
+   cd frontend && npm run dev
+   ```
+
+10. Por defecto el frontend de desarrollo suele atender en el puerto `5173` y la API en `PORT` (por defecto `3000`). La URL base de la API debe coincidir con `VITE_API_URL`.
+
+---
 
 ## 7. Variables de entorno
 
-Archivo: `.env` en la raiz del repositorio.
+### Raíz (`.env`)
 
+| Variable | Uso |
+| -------- | --- |
+| `DB_HOST` | Host MySQL/MariaDB |
+| `DB_USER` | Usuario |
+| `DB_PASSWORD` | Contraseña |
+| `DB_NAME` | Base de datos (p. ej. `flising_crm`) |
+| `PORT` | Puerto de Express |
+| `EMAIL_HOST` | Host SMTP (nodemailer en `index.js`) |
+| `EMAIL_PORT` | Puerto SMTP |
+| `EMAIL_USER` | Usuario SMTP |
+| `EMAIL_PASS` | Contraseña SMTP |
 
-| Variable      | Requerida | Descripcion                | Ejemplo               |
-| ------------- | --------- | -------------------------- | --------------------- |
-| `DB_HOST`     | Si        | Host de MySQL              | `localhost`           |
-| `DB_USER`     | Si        | Usuario de MySQL           | `root`                |
-| `DB_PASSWORD` | Si        | Contrasena de MySQL        | `secret123`           |
-| `DB_NAME`     | Si        | Nombre de base de datos    | `flising_crm`         |
-| `PORT`        | Si        | Puerto de API Express      | `3000`                |
-| `EMAIL_HOST`  | Si        | Host SMTP para nodemailer  | `smtp.gmail.com`      |
-| `EMAIL_PORT`  | Si        | Puerto SMTP                | `465`                 |
-| `EMAIL_USER`  | Si        | Correo emisor SMTP         | `soporte@dominio.com` |
-| `EMAIL_PASS`  | Si        | Password/app password SMTP | `********`            |
+`FRONTEND_BASE_URL` aparece documentada en `.env.example` para enlaces absolutos; el código actual del backend aún puede usar URLs fijas para flujos concretos (ver Deuda técnica).
 
+### Frontend (`frontend/.env`)
 
-Notas operativas:
+| Variable | Uso |
+| -------- | --- |
+| `VITE_API_URL` | Base URL de la API (incluir `/api` si la app así lo espera) |
+| `VITE_FIREBASE_API_KEY` | Configuración web Firebase |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Auth domain |
+| `VITE_FIREBASE_PROJECT_ID` | Project ID |
+| `VITE_FIREBASE_STORAGE_BUCKET` | Storage bucket |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Sender ID |
+| `VITE_FIREBASE_APP_ID` | App ID |
 
-- El `.env` actual del repo local contiene `DB_*` y `PORT`.
-- `EMAIL_*` son requeridas por recuperacion de contrasena, pero no estan en el `.env` actual.
+---
 
 ## 8. Modelo de datos
 
-### Entidades principales
+Relaciones principales:
 
-- `empresas`: entidad multiempresa principal.
-  - Campos clave: `id`, `nombre_comercial`, `rfc`, `plan_suscripcion`, colores de marca.
-- `usuarios`: usuarios del sistema por empresa y rol.
-  - Campos clave: `id`, `nombre`, `email`, `password_hash`, `empresa_id`, `rol`, `supervisor_id`, `reset_token`.
-- `pipelines`: embudos comerciales por empresa.
-  - Campos clave: `id`, `empresa_id`, `nombre`, `clave`.
-- `pipeline_stages`: etapas dentro de cada pipeline.
-  - Campos clave: `id`, `pipeline_id`, `nombre_etapa`, `orden`, `color_hex`.
-- `leads`: prospectos comerciales.
-  - Campos clave: `id`, `empresa_id`, `usuario_id`, `stage_id`, `nombre`, `correo`, `telefono`, `valor`, `medio`.
-- `cotizaciones`: resultados de cotizacion financiera.
-  - Campos clave: `id`, `empresa_id`, `lead_id`, `usuario_id`, `tipo_activo`, `plazo`, `pago_inicial`, `renta_mensual_*`.
-- `clientes_globales`: catalogo fiscal global de clientes.
-  - Campos clave: `id`, `rfc`, `nombre_fiscal`.
-- `lead_sources`: catalogo de origen de leads por empresa.
-  - Campos clave: `id`, `empresa_id`, `nombre`.
+- `empresas` (1) → (N) `usuarios`, `pipelines`, `lead_sources`
+- `pipelines` (1) → (N) `pipeline_stages`
+- `pipeline_stages` (1) → (N) `leads`
+- `usuarios` (1) → (N) `leads`, `cotizaciones` (campos opcionales según tabla)
+- `leads` (0..1) → (N) `cotizaciones`
+- `clientes_globales` (0..1) → (N) `leads` vía `cliente_global_id`
 
-### Relaciones principales
-
-- `empresas (1) -> (N) usuarios` via `usuarios.empresa_id`.
-- `empresas (1) -> (N) pipelines` via `pipelines.empresa_id`.
-- `empresas (1) -> (N) lead_sources` via `lead_sources.empresa_id`.
-- `pipelines (1) -> (N) pipeline_stages` via `pipeline_stages.pipeline_id`.
-- `pipeline_stages (1) -> (N) leads` via `leads.stage_id`.
-- `usuarios (1) -> (N) leads` via `leads.usuario_id`.
-- `usuarios (1) -> (N) cotizaciones` via `cotizaciones.usuario_id`.
-- `leads (0..1) -> (N) cotizaciones` via `cotizaciones.lead_id`.
-- `clientes_globales (1) -> (N) leads` via `leads.cliente_global_id`.
-
-### DDL completo (estado actual)
-
-Orden de creacion compatible con las claves foraneas. Copia autoritativa en `db/schema.sql`.
+DDL alineado con `db/schema.sql`:
 
 ```sql
 CREATE TABLE `empresas` (
@@ -273,6 +252,7 @@ CREATE TABLE `usuarios` (
   `supervisor_id` varchar(36) DEFAULT NULL,
   `reset_token` varchar(255) DEFAULT NULL,
   `reset_token_expira` datetime DEFAULT NULL,
+  `firebase_uid` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),
   KEY `fk_supervisor` (`supervisor_id`),
@@ -363,132 +343,123 @@ CREATE TABLE `cotizaciones` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-
+---
 
 ## 9. Rutas de la API
 
-Base URL: `http://localhost:3000/api`
+Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api/...`. La base pública debe coincidir con cómo se configure `VITE_API_URL` (por ejemplo `http://localhost:3000/api`).
 
-### Autenticacion
+### Autenticación y puente CRM
 
+| Método | Endpoint | Protección | Descripción |
+| ------ | -------- | ---------- | ----------- |
+| POST | `/login/firebase` | Ninguna | Recibe `uid` y `email`; responde perfil de `usuarios` y vincula `firebase_uid` si faltaba. |
+| POST | `/olvide-password` | Ninguna | Flujo por token almacenado en BD y envío SMTP. |
+| POST | `/reset-password` | Ninguna | Actualiza contraseña en BD a partir de `token`. |
 
-| Metodo | Endpoint           | Descripcion                                 |
-| ------ | ------------------ | ------------------------------------------- |
-| POST   | `/login`           | Login por email y contrasena                |
-| POST   | `/olvide-password` | Genera token y envia correo de recuperacion |
-| POST   | `/reset-password`  | Actualiza contrasena con token              |
+### Empresas (`verificarToken` + `revisarRol(['super_admin'])`)
 
+| Método | Endpoint |
+| ------ | -------- |
+| GET | `/empresas` |
+| POST | `/empresas` |
+| PUT | `/empresas/:id` |
+| DELETE | `/empresas/:id` |
 
-### Empresas
+### Usuarios
 
+| Método | Endpoint | Roles permitidos (tras token) |
+| ------ | -------- | ----------------------------- |
+| GET | `/usuarios` | Sin `revisarRol` en código (solo token) |
+| GET | `/usuarios/empresa/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` |
+| POST | `/usuarios` | `super_admin`, `supervisor`, `admin_empresa` |
+| PUT | `/usuarios/:id` | `super_admin`, `supervisor`, `admin_empresa` |
+| DELETE | `/usuarios/:id` | `super_admin`, `admin_empresa` |
 
-| Metodo | Endpoint        | Descripcion       |
-| ------ | --------------- | ----------------- |
-| GET    | `/empresas`     | Lista empresas    |
-| POST   | `/empresas`     | Crea empresa      |
-| PUT    | `/empresas/:id` | Actualiza empresa |
-| DELETE | `/empresas/:id` | Elimina empresa   |
+### Pipelines y etapas (`verificarToken` + roles indicados)
 
+| Método | Endpoint | Roles |
+| ------ | -------- | ----- |
+| GET | `/pipelines/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` |
+| POST | `/pipelines` | mismos |
+| PUT | `/pipelines/:id` | mismos |
+| GET | `/etapas/:pipeline_id` | mismos |
+| POST | `/etapas` | mismos |
+| PUT | `/etapas/:id` | mismos |
 
-### Usuarios y agentes
+### Leads y medios
 
+| Método | Endpoint | Roles |
+| ------ | -------- | ----- |
+| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` |
+| POST | `/leads` | mismos |
+| PUT | `/leads/:id` | mismos |
+| PUT | `/leads/:id/etapa` | mismos |
+| GET | `/medios/:empresa_id` | mismos |
 
-| Metodo | Endpoint                        | Descripcion                |
-| ------ | ------------------------------- | -------------------------- |
-| GET    | `/usuarios`                     | Lista global de usuarios   |
-| GET    | `/usuarios/empresa/:empresa_id` | Lista usuarios por empresa |
-| POST   | `/usuarios`                     | Crea usuario               |
-| PUT    | `/usuarios/:id`                 | Actualiza usuario          |
-| DELETE | `/usuarios/:id`                 | Elimina usuario            |
+### Cotizador (API pública por decisión de producto)
 
+Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer cotizaciones según estos contratos; el filtrado por `rol`/`usuario_id` en listados depende de query params enviados por el cliente.
 
-### Pipelines y etapas
+| Método | Endpoint |
+| ------ | -------- |
+| POST | `/cotizaciones` |
+| GET | `/cotizaciones/lead/:lead_id` |
+| GET | `/cotizaciones/empresa/:empresa_id` |
+| PUT | `/cotizaciones/:id/vincular-lead` |
 
+### Dashboard
 
-| Metodo | Endpoint                 | Descripcion                 |
-| ------ | ------------------------ | --------------------------- |
-| GET    | `/pipelines/:empresa_id` | Lista pipelines por empresa |
-| POST   | `/pipelines`             | Crea pipeline               |
-| PUT    | `/pipelines/:id`         | Actualiza pipeline          |
-| GET    | `/etapas/:pipeline_id`   | Lista etapas por pipeline   |
-| POST   | `/etapas`                | Crea etapa                  |
-| PUT    | `/etapas/:id`            | Actualiza etapa             |
+| Método | Endpoint | Roles |
+| ------ | -------- | ----- |
+| GET | `/dashboard/:empresa_id` | `super_admin`, `admin_empresa`, `supervisor`, `agente` |
 
+Query string usado en el código del frontend: `usuario_id`, `rol` (para acotar datos de `agente`).
 
-### Leads
-
-
-| Metodo | Endpoint             | Descripcion                                |
-| ------ | -------------------- | ------------------------------------------ |
-| GET    | `/leads/:empresa_id` | Lista leads por empresa                    |
-| POST   | `/leads`             | Crea lead                                  |
-| PUT    | `/leads/:id`         | Actualiza lead                             |
-| PUT    | `/leads/:id/etapa`   | Mueve lead de etapa                        |
-| GET    | `/medios/:empresa_id` | Lista fuentes de lead (`lead_sources`) por empresa |
-
-### Cotizador
-
-
-| Metodo | Endpoint                            | Descripcion                                            |
-| ------ | ----------------------------------- | ------------------------------------------------------ |
-| POST   | `/cotizaciones`                     | Guarda cotizacion                                      |
-| GET    | `/cotizaciones/lead/:lead_id`       | Historial de cotizaciones por lead                     |
-| GET    | `/cotizaciones/empresa/:empresa_id` | Historial de cotizaciones por empresa (filtro por rol) |
-| PUT    | `/cotizaciones/:id/vincular-lead`   | Vincula cotizacion a lead                              |
-
+---
 
 ## 10. Roles y permisos
 
+Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`.
 
-| Rol             | Descripcion                          | Permisos principales (estado actual)                              |
-| --------------- | ------------------------------------ | ----------------------------------------------------------------- |
-| `super_admin`   | Administracion global del sistema    | Gestion de empresas, usuarios y vistas globales                   |
-| `admin_empresa` | Administracion operativa por empresa | Gestion de usuarios de su empresa, pipelines, leads, cotizaciones |
-| `supervisor`    | Lider comercial                      | Gestion de equipo y seguimiento operativo                         |
-| `agente`        | Ejecutivo comercial                  | Gestion de leads y cotizaciones propias                           |
+**Backend:** Tras `verificarToken` (Firebase ID token), `revisarRol` consulta el `rol` en `usuarios` filtrando por `firebase_uid` del token y compara con la lista permitida en cada ruta.
 
+**Frontend:** `App.jsx` envuelve rutas en `RutaProtegida` según `usuario.rol`. `Sidebar.jsx` filtra ítems de menú por rol. Tras el login, el perfil se guarda en `localStorage` bajo `usuarioCRM` para hidratar UI y parámetros de consulta; las peticiones autenticadas añaden `Authorization: Bearer` con el token de Firebase vía interceptor en `api.js`.
 
-Nota critica:
+**Cotizador:** Los endpoints REST del cotizador no requieren autenticación (módulo público en API). La aplicación web sigue mostrando el cotizador solo a usuarios que hayan iniciado sesión en la SPA, pero la API no refuerza el mismo límite en esas rutas.
 
-- El control de acceso y visibilidad vive principalmente en frontend (`localStorage` + menus/rutas).
-- El backend no implementa middleware robusto de autorizacion por rol.
-- Migrar estas responsabilidades a Firebase.
+---
 
-## 11. Deuda tecnica
+## 11. Deuda técnica
 
+| Área | Problema |
+| ---- | -------- |
+| Seguridad / red | CORS configurado con `origin: '*'` en `index.js`. |
+| TLS | `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'` en el proceso de Node. |
+| Correo / TLS | `nodemailer` usa `tls: { rejectUnauthorized: false }` y el arranque depende de variables SMTP correctas. |
+| Recuperación de contraseña | `LoginView` usa recuperación de Firebase; `ResetPasswordView` y `POST /api/reset-password` implementan flujo por token en BD; hay dos mecanismos distintos que pueden desalinearse. |
+| Enlaces en correo | `POST /api/olvide-password` construye enlace con host fijo de desarrollo en el cuerpo del mensaje. |
+| Autorización | `GET /api/usuarios` exige token pero no aplica `revisarRol` en el código actual. |
+| Autorización Firebase | No se usan custom claims en el token; el rol siempre se lee de la BD en el middleware. |
+| Datos / identidad | `usuarios.id` es UUID en MySQL; `firebase_uid` es columna separada (no coincide el PK con el UID de Firebase en el alta vía API). |
+| Duplicación | Inicialización de Firebase Admin tanto en `firebase.js` como en `index.js`. |
+| Arquitectura backend | Toda la API en `index.js` sin capas separadas. |
+| Calidad | ESLint con múltiples errores en `frontend/` y en `index.js`. |
+| Calidad | Sin tests automatizados en scripts del repo. |
+| Operación | Sin pipeline de CI/CD en el repositorio. |
+| UX / datos | Dashboard y vistas asumen `empresa_id` para usuarios de empresa; perfiles sin empresa pueden tener comportamiento limitado. |
+| Código cliente | `ResetPasswordView` llama a la API con URL absoluta fija en lugar de `VITE_API_URL`. |
 
-| Area          | Problema                                                                                                                                                                 | Severidad |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| Base de datos | Sin herramienta de migraciones incrementales (Flyway/Liquibase, etc.); el DDL base esta versionado en `db/schema.sql`.                                                      | Media     |
-| Backend       | Todo el backend esta en un solo archivo (`index.js`). Sin separacion de capas ni controladores.                                                                          | Media     |
-| Backend       | CORS abierto (`origin: '*'`).                                                                                                                                            | Media     |
-| Backend       | `NODE_TLS_REJECT_UNAUTHORIZED` forzado a `'0'` en runtime.                                                                                                               | Media     |
-| Backend       | Sin middleware de autorizacion por rol en API.                                                                                                                           | Media     |
-| Backend       | Variables SMTP no incluidas en `.env` actual del repositorio.                                                                                                            | Media     |
-| Frontend      | Posibles URLs de API residuales fuera de `VITE_API_URL` en `api.js`; conviene auditar el resto del codigo.                                                                | Baja      |
-| Frontend      | 21 errores activos de ESLint.                                                                                                                                            | Baja      |
-| General       | Sin tests automatizados.                                                                                                                                                 | Media     |
-| General       | Sin CI/CD.                                                                                                                                                               | Baja      |
+---
 
+## 12. Próximos pasos sugeridos
 
-## 12. Proximos pasos sugeridos
-
-### Critico
-
-1. Integrar Firebase Auth y Firebase Admin SDK para login y asignación de custom claims de rol.
-2. Reemplazar el gate de localStorage en frontend y el CORS abierto en backend por validación de token en cada endpoint.
-3. Retirar `NODE_TLS_REJECT_UNAUTHORIZED='0'` y configurar TLS correctamente.
-4. Definir herramienta y flujo de migraciones incrementales sobre el DDL base en `db/schema.sql`.
-
-### Importante
-
-1. Separar backend por capas (rutas/controladores/servicios/repositorios).
-2. Corregir errores de ESLint activos y dejar lint en verde.
-3. Documentar y automatizar seed inicial (`super_admin` + empresa base).
-
-### Deseable
-
-1. Incorporar tests automatizados (unitarios e integracion API).
-2. Agregar pipeline CI/CD basico para lint (opcional) + test + build.
-3. Incorporar observabilidad minima (logging estructurado y manejo centralizado de errores).
-
+- Endurecer CORS y TLS (variables de entorno por entorno, sin relajar verificación global).
+- Alinear recuperación de contraseña: un solo flujo coherente (Firebase o backend) y enlaces basados en configuración.
+- Revisar `GET /api/usuarios` y el resto de rutas para políticas de rol explícitas; valorar custom claims si conviene reducir lecturas a BD.
+- Sustituir URLs hardcodeadas por variables de entorno en correo y en `ResetPasswordView`.
+- Introducir herramienta o convención de migraciones SQL encima de `db/schema.sql`.
+- Modularizar el backend (rutas, controladores, servicios).
+- Dejar ESLint sin errores y mantener reglas en CI.
+- Añadir pruebas automatizadas y un pipeline mínimo de integración continua.
+- Logging estructurado y manejo centralizado de errores.
