@@ -102,7 +102,7 @@ app.post('/api/usuarios', verificarToken, revisarRol(['super_admin','supervisor'
     }
 
     try {
-        // Si no envían contraseña desde el front, ponemos una temporal segura por defecto (Firebase exige min 6 caracteres)
+        // Si no envían contraseña desde el front, ponemos una temporal segura por defecto
         const passwordDefinitiva = password_hash || '123456';
         
         // 1. Creamos al usuario en Firebase (La nube de Google)
@@ -123,12 +123,53 @@ app.post('/api/usuarios', verificarToken, revisarRol(['super_admin','supervisor'
             VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?)
         `;
         
-        pool.query(query, [nombre, email, hashedPassword, rol, supId, empresa_id, firebaseUser.uid], (err, result) => {
+        pool.query(query, [nombre, email, hashedPassword, rol, supId, empresa_id, firebaseUser.uid], async (err, result) => {
             if (err) {
                 console.error("❌ Error en MySQL al crear usuario:", err.sqlMessage);
-                // Si falla MySQL, deberíamos borrarlo de Firebase para no dejar "basura", pero por ahora mandamos el error
                 return res.status(500).json({ error: err.sqlMessage });
             }
+
+            // --- INICIO: ENVÍO DE CORREO DE BIENVENIDA ---
+            try {
+                const emailHtml = `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                        <div style="background-color: #0056b3; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">¡Bienvenido a Flising CRM!</h2>
+                        </div>
+                        <div style="padding: 20px; color: #333;">
+                            <p>Hola <strong>${nombre}</strong>,</p>
+                            <p>Tu cuenta ha sido creada exitosamente. A continuación, te compartimos tus credenciales de acceso:</p>
+                            
+                            <div style="background-color: #f4f4f4; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                                <p style="margin: 5px 0;"><strong>Usuario / Correo:</strong> ${email}</p>
+                                <p style="margin: 5px 0;"><strong>Contraseña temporal:</strong> ${passwordDefinitiva}</p>
+                            </div>
+
+                            <p style="text-align: center; margin: 30px 0;">
+                                <a href="http://localhost:5173" style="background-color: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                                    Iniciar Sesión en el CRM
+                                </a>
+                            </p>
+
+                            <p style="font-size: 13px; color: #777;">
+                                <em>Nota: Por seguridad, te recomendamos cambiar esta contraseña en tu perfil una vez que ingreses.</em>
+                            </p>
+                        </div>
+                    </div>
+                `;
+
+                await transporter.sendMail({
+                    from: `"Flising CRM" <${process.env.EMAIL_USER}>`,
+                    to: email,
+                    subject: '🎉 Tus accesos para Flising CRM',
+                    html: emailHtml
+                });
+                console.log(`✅ Correo de bienvenida enviado a: ${email}`);
+            } catch (mailError) {
+                console.error("❌ Error enviando correo de bienvenida:", mailError);
+            }
+            // --- FIN: ENVÍO DE CORREO DE BIENVENIDA ---
+
             res.status(201).json({ mensaje: "Usuario creado con éxito en Firebase y MySQL" });
         });
 
