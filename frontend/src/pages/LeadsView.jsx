@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
-
+import { Users, User, Check, ChevronDown } from 'lucide-react';
 function LeadsView() {
   const [leads, setLeads] = useState([]);
   const [medios, setMedios] = useState([]);
   const [etapas, setEtapas] = useState([]);
   const [agentes, setAgentes] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [menuAgentesAbierto, setMenuAgentesAbierto] = useState(false);
   // NUEVO: Estado para el filtro inteligente
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -201,22 +202,80 @@ const handleDragStart = (e, leadId) => {
         
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end sm:shrink-0">
           
-          {/* 🕵🏻‍♂️ INICIO DEL FILTRO (SOLO JEFES) */}
-          {(usuarioLogueado.rol === 'super_admin' || usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
-            <select 
-              value={filtroAgente}
-              onChange={(e) => setFiltroAgente(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm"
+{(usuarioLogueado.rol === 'super_admin' || usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
+  <div className="relative inline-block text-left min-w-[240px]">
+    {/* Botón Principal */}
+    <button 
+      type="button"
+      onClick={() => setMenuAgentesAbierto(!menuAgentesAbierto)}
+      className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm transition-all hover:bg-slate-50"
+    >
+      <span className="flex items-center gap-2">
+        {filtroAgente === "" ? (
+          <Users size={18} className="text-blue-500" />
+        ) : (
+          <User size={18} className="text-blue-500" />
+        )}
+        {filtroAgente === "" 
+          ? "Todos los agentes" 
+          : agentes.find(a => a.id === filtroAgente)?.nombre || "Seleccionar agente..."}
+      </span>
+      <ChevronDown 
+        size={16} 
+        className={`text-slate-400 transition-transform duration-200 ${menuAgentesAbierto ? 'rotate-180' : ''}`} 
+      />
+    </button>
+
+    {/* Menú Desplegable (Flotante) */}
+    {menuAgentesAbierto && (
+      <div className="absolute z-10 w-full mt-2 bg-white rounded-xl shadow-lg border border-slate-100 py-1 max-h-60 overflow-y-auto">
+        
+        {/* Opción: Todos los agentes */}
+        <button
+          type="button"
+          onClick={() => {
+            setFiltroAgente("");
+            setMenuAgentesAbierto(false);
+          }}
+          className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
+            filtroAgente === "" ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Users size={18} className={filtroAgente === "" ? 'text-blue-600' : 'text-slate-400'} />
+            Todos los agentes
+          </div>
+          {filtroAgente === "" && <Check size={16} className="text-blue-600" />}
+        </button>
+
+        {/* Opciones: Lista de Agentes Dinámica */}
+        {agentes.map(agente => {
+          const esSeleccionado = filtroAgente === agente.id;
+          return (
+            <button
+              key={agente.id}
+              type="button"
+              onClick={() => {
+                setFiltroAgente(agente.id);
+                setMenuAgentesAbierto(false);
+              }}
+              className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
+                esSeleccionado ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+              }`}
             >
-              <option value="">👥 Todos los agentes</option>
-              {agentes.map(agente => (
-                <option key={agente.id} value={agente.id}>
-                  👤 {agente.nombre}
-                </option>
-              ))}
-            </select>
-          )}
-          {/* 🛑 FIN DEL FILTRO */}
+              <div className="flex items-center gap-3">
+                <User size={18} className={esSeleccionado ? 'text-blue-600' : 'text-slate-400'} />
+                {agente.nombre}
+              </div>
+              {esSeleccionado && <Check size={16} className="text-blue-600" />}
+            </button>
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+      
 
           {/* 🟢 EL BOTÓN ESTÁ AFUERA PARA QUE EL AGENTE TAMBIÉN LO VEA */}
           <button 

@@ -616,12 +616,12 @@ app.get('/api/cotizaciones/lead/:lead_id', (req, res) => {
     });
 });
 
-// 3. Obtener el historial completo de cotizaciones de la empresa
+
 app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     const { empresa_id } = req.params;
-    const { usuario_id, rol } = req.query; // Recibimos quién hace la petición
+    const { usuario_id, rol } = req.query; 
     
-    // Hacemos un JOIN con leads para el nombre del cliente y con usuarios para el nombre del agente
+    // Usamos GROUP BY c.id para colapsar cualquier duplicado fantasma
     let query = `
         SELECT c.*, l.nombre as lead_nombre, u.nombre as agente_nombre 
         FROM cotizaciones c
@@ -632,13 +632,13 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     
     const params = [empresa_id];
 
-    // Si es un agente normal, agregamos un filtro para que SOLO vea las suyas
     if (rol === 'agente') {
         query += ` AND c.usuario_id = ?`;
         params.push(usuario_id);
     }
 
-    query += ` ORDER BY c.fecha_creacion DESC`;
+    // El GROUP BY va ANTES del ORDER BY
+    query += ` GROUP BY c.id ORDER BY c.fecha_creacion DESC`;
     
     pool.query(query, params, (error, resultados) => {
         if (error) {

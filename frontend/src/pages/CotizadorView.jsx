@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
+import html2pdf from 'html2pdf.js'; // <--- AGREGA ESTA LÍNEA
 
 // --- TABLAS DE TOPES RESIDUALES (Directas de tu código) ---
 const tablaResidual = [
@@ -284,10 +285,12 @@ const CotizadorView = () => {
     }
   };
 
-  const imprimirPDF = () => {
+const imprimirPDF = () => {
     if (Object.keys(errores).length > 0 || !formData.valorActivo) return alert("Completa la cotización sin errores.");
+    
+    // 1. Creamos el diseño del PDF (Mismo que ya tenías, pero optimizado para descarga)
     const htmlContent = `
-      <div style="background-color: #2c2c2c; color: white; font-family: 'Lato', sans-serif; font-size: 0.7rem; padding: 20px; border-radius: 10px; max-width: 900px; display: flex; justify-content: space-between; align-items: flex-start; margin: auto;">
+      <div style="background-color: #2c2c2c; color: white; font-family: 'Lato', sans-serif; font-size: 12px; padding: 20px; border-radius: 10px; max-width: 900px; display: flex; justify-content: space-between; align-items: flex-start; margin: auto;">
         <div style="flex: 1;">
           <div style="display: flex; margin-bottom: 10px;"><div style="width: 250px;"><strong>NOMBRE DEL CLIENTE</strong></div><div>${formData.nombre_cliente || 'A quien corresponda'}</div></div>
           <div style="display: flex; margin-bottom: 10px;"><div style="width: 250px;"><strong>PRODUCTO/VEHÍCULO</strong></div><div>${formData.nombreActivo}</div></div>
@@ -299,7 +302,7 @@ const CotizadorView = () => {
         </div>
       </div>
       <br/>
-      <div style="color:black; font-family:Lato, sans-serif; padding:10px; max-width:900px; margin:auto; font-size: 0.75rem;">
+      <div style="color:black; font-family: 'Lato', sans-serif; padding:10px; max-width:900px; margin:auto; font-size: 13px;">
         <div style="display:flex; gap:20px; flex-wrap:wrap;">
           
           <div style="flex:1; border: 1px solid #ddd; border-radius:15px; padding:20px; min-width:300px;">
@@ -312,7 +315,7 @@ const CotizadorView = () => {
             <hr style="border-color:#dddddd; margin:15px 0;">
             <div style="display: flex; justify-content: space-between;"><span><strong>Subtotal:</strong></span><span>${formatoMoneda(res.pagoInicialSubtotal)}</span></div>
             <div style="display: flex; justify-content: space-between;"><span><strong>IVA:</strong></span><span>${formatoMoneda(res.pagoInicialIVA)}</span></div>
-            <div style="display:flex; justify-content:space-between; background-color:#ea5533; color:white; padding:10px; border-radius:5px; margin-top:15px; font-weight:bold; font-size:1rem;">
+            <div style="display:flex; justify-content:space-between; background-color:#ea5533; color:white; padding:10px; border-radius:5px; margin-top:15px; font-weight:bold; font-size:16px;">
               <span><strong>Total inicial:</strong></span><span>${formatoMoneda(res.pagoInicialTotal)}</span>
             </div>
           </div>
@@ -326,7 +329,7 @@ const CotizadorView = () => {
             <hr style="border-color:#dddddd; margin:15px 0;">
             <div style="display: flex; justify-content: space-between;"><span><strong>Subtotal:</strong></span><span>${formatoMoneda(res.rentaMensualSubtotal)}</span></div>
             <div style="display: flex; justify-content: space-between;"><span><strong>IVA:</strong></span><span>${formatoMoneda(res.rentaMensualIVA)}</span></div>
-            <div style="display:flex; justify-content:space-between; background-color:black; color:white; padding:10px; border-radius:5px; margin-top:15px; font-weight:bold; font-size:1rem;">
+            <div style="display:flex; justify-content:space-between; background-color:black; color:white; padding:10px; border-radius:5px; margin-top:15px; font-weight:bold; font-size:16px;">
               <span><strong>Total renta mensual:</strong></span><span>${formatoMoneda(res.rentaMensualTotal)}</span>
             </div>
           </div>
@@ -335,9 +338,27 @@ const CotizadorView = () => {
         <div style="margin-top: 20px;"><p><strong>Valor residual estimado:</strong> ${formatoMoneda(res.residualReal)}</p></div>
       </div>
     `;
-    const printWindow = window.open("", "_blank");
-    printWindow.document.write(`<html><head><title>Cotización</title><style>body{font-family: Arial, sans-serif; padding: 30px;} *{-webkit-print-color-adjust: exact;}</style></head><body onload="window.print();">${htmlContent}</body></html>`);
-    printWindow.document.close();
+
+    // 2. Creamos un contenedor temporal en memoria
+    const container = document.createElement('div');
+    container.innerHTML = htmlContent;
+
+    // 3. Nombramos el archivo (Si hay cliente, lo incluye, si no, genérico)
+    const nombreArchivo = formData.nombre_cliente 
+      ? `Cotizacion_${formData.nombre_cliente.replace(/\s+/g, '_')}.pdf`
+      : 'Cotizacion_Flising.pdf';
+
+    // 4. Configuramos html2pdf para que se vea premium
+    const opciones = {
+      margin:       10,
+      filename:     nombreArchivo,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2 }, // Da mejor resolución
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    // 5. ¡Ejecutamos la descarga mágica!
+    html2pdf().set(opciones).from(container).save();
   };
 
   const formatoMoneda = (monto) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
@@ -664,6 +685,7 @@ const CotizadorView = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                <th className="p-4 rounded-tl-xl">Folio</th>
                 <th className="p-4 rounded-tl-xl">Fecha</th>
                 <th className="p-4">Prospecto</th>
                 
@@ -680,50 +702,66 @@ const CotizadorView = () => {
             </thead>
             <tbody>
               {historial.map(cot => (
-                <tr key={cot.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                  <td className="p-4 text-sm font-medium text-slate-700">
-                    {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
-                  </td>
-                  <td className="p-4 text-sm font-bold text-slate-900">
-                    {cot.lead_nombre ? (
-                      <span className="text-blue-600 flex items-center gap-1">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
-                        {cot.lead_nombre}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400 font-normal italic">Sin prospecto</span>
-                    )}
-                  </td>
+  <tr key={cot.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+    
+    {/* 1. FOLIO */}
+    <td className="p-4 text-sm font-black text-slate-800">
+      {cot.folio ? `FL-${String(cot.folio).padStart(3, '0')}` : '---'}
+    </td>
 
-                  {/* EL NOMBRE DEL AGENTE SOLO SE VE SI ERES JEFE O ADMIN */}
-                  {usuarioLogueado.rol !== 'agente' && (
-                    <td className="p-4 text-sm font-medium text-slate-500 bg-blue-50/30">
-                      {cot.agente_nombre || 'Desconocido'}
-                    </td>
-                  )}
+    {/* 2. FECHA */}
+    <td className="p-4 text-sm font-medium text-slate-700">
+      {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
+    </td>
 
-                  <td className="p-4 text-sm text-slate-600">{cot.tipo_activo}</td>
-                  <td className="p-4 text-sm font-bold text-blue-600">{formatoMoneda(cot.valor_activo)}</td>
-                  <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
-                  <td className="p-4 text-sm">
-                    {!cot.lead_nombre && (
-                      <button 
-                        onClick={() => convertirDesdeHistorial(cot)}
-                        className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
-                      >
-                        ➕ Hacer Prospecto
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {historial.length === 0 && (
-                <tr>
-                  <td colSpan={usuarioLogueado.rol !== 'agente' ? "7" : "6"} className="p-8 text-center text-slate-400 font-medium">
-                    Aún no hay cotizaciones guardadas en el sistema.
-                  </td>
-                </tr>
-              )}
+    {/* 3. PROSPECTO */}
+    <td className="p-4 text-sm font-bold text-slate-900">
+      {cot.lead_nombre ? (
+        <span className="text-blue-600 flex items-center gap-1">
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+          {cot.lead_nombre}
+        </span>
+      ) : (
+        <span className="text-slate-400 font-normal italic">Sin prospecto</span>
+      )}
+    </td>
+
+    {/* 4. AGENTE CREADOR (Solo Jefes/Admin) */}
+    {usuarioLogueado.rol !== 'agente' && (
+      <td className="p-4 text-sm font-medium text-slate-500 bg-blue-50/30">
+        {cot.agente_nombre || 'Desconocido'}
+      </td>
+    )}
+
+    {/* 5. TIPO DE ACTIVO */}
+    <td className="p-4 text-sm text-slate-600">{cot.tipo_activo}</td>
+
+    {/* 6. VALOR */}
+    <td className="p-4 text-sm font-bold text-blue-600">{formatoMoneda(cot.valor_activo)}</td>
+
+    {/* 7. RENTA MENSUAL */}
+    <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
+
+    {/* 8. ACCIÓN */}
+    <td className="p-4 text-sm">
+      {!cot.lead_nombre && (
+        <button 
+          onClick={() => convertirDesdeHistorial(cot)}
+          className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+        >
+          ➕ Hacer Prospecto
+        </button>
+      )}
+    </td>
+  </tr>
+))}
+{historial.length === 0 && (
+  <tr>
+    <td colSpan={usuarioLogueado.rol !== 'agente' ? "8" : "7"} className="p-8 text-center text-slate-400 font-medium">
+      Aún no hay cotizaciones guardadas en el sistema.
+    </td>
+  </tr>
+)}
             </tbody>
           </table>
         </div>
