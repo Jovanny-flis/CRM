@@ -62,26 +62,39 @@ const obtenerEmpresas = async () => {
 
 const handleSubmit = async (e) => {
     e.preventDefault();
-    // Esto enviará 'nombre_comercial' al backend
     try {
+        // 1. Obtenemos el usuario actual de Firebase para sacar el token
+        const usuarioActual = auth.currentUser;
+        if (!usuarioActual) {
+            return alert("❌ No hay una sesión activa. Por favor, vuelve a iniciar sesión.");
+        }
+
+        // 2. Generamos el token (el "gafete" de Super Admin)
+        const token = await usuarioActual.getIdToken();
+
+        // 3. Hacemos la petición enviando el token en los headers
         const res = await fetch(editandoId 
             ? `http://localhost:3000/api/empresas/${editandoId}` 
             : 'http://localhost:3000/api/empresas', {
             method: editandoId ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData) // formData ya tiene nombre_comercial
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` // <--- ESTO ES LO QUE FALTABA
+            },
+            body: JSON.stringify(formData)
         });
 
         if (res.ok) {
             alert("✅ ¡Guardado con éxito!");
             cancelarEdicion();
-            obtenerEmpresas(); // Esto recargará la tabla de abajo
+            obtenerEmpresas(); 
         } else {
             const errorData = await res.json();
-            alert("❌ Error: " + errorData.error);
+            alert("❌ Error: " + (errorData.error || "No tienes permisos"));
         }
     } catch (error) {
-        alert("❌ Error de conexión");
+        console.error(error);
+        alert("❌ Error de conexión al servidor");
     }
 };
 
