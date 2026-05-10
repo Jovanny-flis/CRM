@@ -17,6 +17,10 @@ const pool = require('./db');
 require('./firebase');
 const admin = require('firebase-admin');
 
+// 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
+app.use(cors());
+app.use(express.json());
+
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
 // super_admin pasa siempre. El resto debe coincidir con su empresa_id.
 const puedeOperarEnEmpresa = (usuarioCRM, empresaIdObjetivo) => {
@@ -50,6 +54,7 @@ app.use((req, res, next) => {
 // Verificación de salud del Pool al iniciar
 pool.getConnection((err, connection) => {
     if (err) {
+        console.error("🚨 ¡ERROR DE BASE DE DATOS! ->", err);
         console.error('❌ ERROR CRÍTICO DE CONEXIÓN:', err.message);
     } else {
         console.log('✅ Base de datos conectada y lista mediante Pool');
@@ -453,11 +458,13 @@ app.put('/api/leads/:id',
 app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
     pool.query('SELECT * FROM lead_sources WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
-        if (error) return res.status(500).json({ error: error.message });
+        if (error) {
+            console.error("🚨 ¡ERROR EN MEDIOS! ->", error.message); // Nuestra trampa
+            return res.status(500).json({ error: error.message });
+        }
         res.status(200).json(resultados);
     });
 });
-
 // 1. RUTA PARA MOVER DE ETAPA (Drag & Drop)
 app.put('/api/leads/:id/etapa',
     verificarToken,
@@ -478,36 +485,38 @@ app.put('/api/leads/:id/etapa',
 // ==========================================
 
 app.post('/api/login/firebase', (req, res) => {
-    const { uid, email } = req.body;
+    try {
+        const { uid, email } = req.body;
+        console.log("🔍 Datos recibidos del frontend:", { uid, email });
 
-    // Buscamos al usuario por su UID de Firebase, o por su correo (para usuarios viejos)
-    const queryBuscar = 'SELECT * FROM usuarios WHERE firebase_uid = ? OR email = ? LIMIT 1';
-    
-    pool.query(queryBuscar, [uid, email], (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error en la base de datos al verificar usuario" });
+        const queryBuscar = 'SELECT * FROM usuarios WHERE firebase_uid = ? OR email = ? LIMIT 1';
         
-        // Si no existe ni el correo ni el UID, lo rechazamos
-        if (resultados.length === 0) {
-            return res.status(403).json({ error: "Tu cuenta no está registrada en el CRM. Habla con tu administrador." });
-        }
+        pool.query(queryBuscar, [uid, email], (err, resultados) => {
+            if (err) {
+                console.error("🚨 ¡ERROR DE MYSQL! ->", err);
+                return res.status(500).json({ error: "Error en la base de datos al verificar usuario" });
+            }
+            
+            if (resultados.length === 0) {
+                return res.status(403).json({ error: "Tu cuenta no está registrada en el CRM. Habla con tu administrador." });
+            }
 
-        const usuario = resultados[0];
+            const usuario = resultados[0];
 
-        // EL AUTOVINCULADOR: Si el usuario es viejo y no tenía su UID, se lo guardamos para siempre
-        if (!usuario.firebase_uid) {
-            pool.query('UPDATE usuarios SET firebase_uid = ? WHERE id = ?', [uid, usuario.id], (errAct) => {
-                if (errAct) console.error("❌ Error vinculando UID en BD:", errAct);
-            });
-        }
+            if (!usuario.firebase_uid) {
+                pool.query('UPDATE usuarios SET firebase_uid = ? WHERE id = ?', [uid, usuario.id], (errAct) => {
+                    if (errAct) console.error("❌ Error vinculando UID en BD:", errAct);
+                });
+            }
 
-        // Por seguridad, le borramos la contraseña encriptada vieja antes de mandarlo a React
-        delete usuario.password_hash;
-
-        // Le enviamos a React el perfil oficial sacado de MySQL
-        res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
-    });
+            delete usuario.password_hash;
+            return res.status(200).json({ mensaje: "Login exitoso", usuario: usuario });
+        });
+    } catch (errorFatal) {
+        console.error("🚨 ¡ERROR FATAL EN EL CÓDIGO! ->", errorFatal);
+        return res.status(500).json({ error: "Error interno del servidor" });
+    }
 });
-
 // --- CONFIGURACIÓN DEL CARTERO (Nodemailer) ---
 const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
