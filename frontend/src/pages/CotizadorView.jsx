@@ -522,11 +522,12 @@ const imprimirPDF = () => {
                   type="number" 
                   value={formData.pagoInicial} 
                   onChange={e => setFormData({...formData, pagoInicial: e.target.value})} 
-                  className="flex-1 border border-slate-200 rounded-xl px-4 py-2 outline-none" 
+                  className={`flex-1 border rounded-xl px-4 py-2 outline-none ${errores.pagoInicial ? 'border-red-500' : 'border-slate-200'}`} 
                 />
                 <ToggleBtn flag={formData.isPagoInicialPct} onClick={() => setFormData({...formData, isPagoInicialPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isPagoInicialPct} onClick={() => setFormData({...formData, isPagoInicialPct: false})} label="$" />
               </div>
+              {errores.pagoInicial && <p className="text-red-500 text-xs mt-1">{errores.pagoInicial}</p>}
             </div>
 
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
