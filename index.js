@@ -146,7 +146,7 @@ app.post('/api/usuarios', verificarToken, revisarRol(['super_admin','supervisor'
                             </div>
 
                             <p style="text-align: center; margin: 30px 0;">
-                                <a href="http://localhost:5173" style="background-color: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                                <a href="https://flow.flising.cloud/" style="background-color: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
                                     Iniciar Sesión en el CRM
                                 </a>
                             </p>
