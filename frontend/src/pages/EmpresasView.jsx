@@ -35,7 +35,7 @@ const obtenerEmpresas = async () => {
         const token = await usuarioActual.getIdToken();
 
         // 3. Hacemos la petición enviando el token en la cabecera
-        const res = await fetch('http://localhost:3000/api/empresas', {
+        const res = await fetch(import.meta.env.VITE_API_URL + '/empresas', {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${token}` 
@@ -74,8 +74,8 @@ const handleSubmit = async (e) => {
 
         // 3. Hacemos la petición enviando el token en los headers
         const res = await fetch(editandoId 
-            ? `http://localhost:3000/api/empresas/${editandoId}` 
-            : 'http://localhost:3000/api/empresas', {
+            ? `${import.meta.env.vite_api_url}/empresas/${editandoId}` 
+            : import.meta.env.VITE_API_URL + '/empresas', {
             method: editandoId ? 'PUT' : 'POST',
             headers: { 
                 'Content-Type': 'application/json',
@@ -100,7 +100,7 @@ const handleSubmit = async (e) => {
 
     const eliminarEmpresa = async (id) => {
         if (!confirm("¿Seguro que quieres eliminar esta empresa?")) return;
-        const res = await fetch(`http://localhost:3000/api/empresas/${id}`, { method: 'DELETE' });
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/empresas/${id}`, { method: 'DELETE' });
         if (res.ok) obtenerEmpresas();
         else alert("No se puede eliminar: tiene datos vinculados.");
     };
