@@ -286,80 +286,252 @@ const CotizadorView = () => {
   };
 
 const imprimirPDF = () => {
-    if (Object.keys(errores).length > 0 || !formData.valorActivo) return alert("Completa la cotización sin errores.");
-    
-    // 1. Creamos el diseño del PDF (Mismo que ya tenías, pero optimizado para descarga)
-    const htmlContent = `
-      <div style="background-color: #2c2c2c; color: white; font-family: 'Lato', sans-serif; font-size: 12px; padding: 20px; border-radius: 10px; max-width: 900px; display: flex; justify-content: space-between; align-items: flex-start; margin: auto;">
-        <div style="flex: 1;">
-          <div style="display: flex; margin-bottom: 10px;"><div style="width: 250px;"><strong>NOMBRE DEL CLIENTE</strong></div><div>${formData.nombre_cliente || 'A quien corresponda'}</div></div>
-          <div style="display: flex; margin-bottom: 10px;"><div style="width: 250px;"><strong>PRODUCTO/VEHÍCULO</strong></div><div>${formData.nombreActivo}</div></div>
-          <div style="display: flex; margin-bottom: 10px;"><div style="width: 250px;"><strong>PRECIO (IVA INCLUIDO)</strong></div><div>${formatoMoneda(formData.valorActivo)} MXN</div></div>
-          <div style="display: flex;"><div style="width: 250px;"><strong>PLAZO (MESES)</strong></div><div>${formData.plazo}</div></div>
+  if (Object.keys(errores).length > 0 || !formData.valorActivo)
+    return alert("Completa la cotización sin errores.");
+
+  const fechaHoy = new Date().toLocaleDateString('es-MX', {
+    day: '2-digit', month: 'long', year: 'numeric'
+  });
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; font-size: 10px; background: white; width: 794px; height: 1122px; margin: 0; padding: 0; display: flex; flex-direction: column; box-sizing: border-box;">
+
+      <!-- BANDA SUPERIOR GRIS: sin border-radius, ocupa todo el ancho -->
+      <div style="background-color: #2c2c2c; padding: 5px 24px 20px 24px; margin: 0;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+          <img
+            src="/branding/flising-logo-blanco.png"
+            alt="Flising"
+            style="height: 110px; object-fit: contain;"
+            onerror="this.style.display='none'"
+          />
+          <div style="text-align: right; color: #cccccc; font-size: 10px; line-height: 1.8;">
+            <div><strong style="color: white;">Fecha de expedición</strong>&nbsp;&nbsp;${fechaHoy}</div>
+          </div>
         </div>
-        <div style="margin-right: 25px;">
-          <img src="https://assets.zyrosite.com/dWxvqeKx2lHMaZl8/flisingr_itm_blanco-Y4LvM3Mor4sKaZq5.png" alt="Logo" style="height: 60px; object-fit: contain;">
+        <div style="color: white;">
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">COTIZACIÓN</div>
+          <div style="font-size: 10px; color: #cccccc; line-height: 1.5;">
+            Agradecemos tu confianza en Flising, es un gusto atenderte.<br/>
+            A continuación, te presentamos los detalles específicos de tu cotización solicitada.
+          </div>
         </div>
       </div>
-      <br/>
-      <div style="color:black; font-family: 'Lato', sans-serif; padding:10px; max-width:900px; margin:auto; font-size: 13px;">
-        <div style="display:flex; gap:20px; flex-wrap:wrap;">
-          
-          <div style="flex:1; border: 1px solid #ddd; border-radius:15px; padding:20px; min-width:300px;">
-            <div style="background-color:#ea5533; color:white; padding:10px; text-align:center; border-radius:5px; margin-bottom:15px;"><strong>DESEMBOLSO INICIAL</strong></div>
-            <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span><strong>Renta Extraordinaria:</strong></span><span>${formatoMoneda(res.pagoInicialSub)}</span></div>
-            <div style="display: flex; justify-content: space-between; background-color: #e9e9e9; padding: 4px;"><span><strong>Comisión por apertura:</strong></span><span>${formatoMoneda(res.comisionSub)}</span></div>
-            <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span><strong>GPS:</strong></span><span>${formatoMoneda(res.gpsSub)}</span></div>
-            <div style="display: flex; justify-content: space-between; background-color: #e9e9e9; padding: 4px;"><span><strong>Seguro:</strong></span><span>${formatoMoneda(res.seguroSub)}</span></div>
-            <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span><strong>Trámites e impuestos:</strong></span><span>${formatoMoneda(res.serviciosSub)}</span></div>
-            <hr style="border-color:#dddddd; margin:15px 0;">
-            <div style="display: flex; justify-content: space-between;"><span><strong>Subtotal:</strong></span><span>${formatoMoneda(res.pagoInicialSubtotal)}</span></div>
-            <div style="display: flex; justify-content: space-between;"><span><strong>IVA:</strong></span><span>${formatoMoneda(res.pagoInicialIVA)}</span></div>
-            <div style="display:flex; justify-content:space-between; background-color:#ea5533; color:white; padding:10px; border-radius:5px; margin-top:15px; font-weight:bold; font-size:16px;">
-              <span><strong>Total inicial:</strong></span><span>${formatoMoneda(res.pagoInicialTotal)}</span>
-            </div>
-          </div>
 
-          <div style="flex:1; border: 1px solid #ddd; border-radius:15px; padding:20px; min-width:300px;">
-            <div style="background-color:black; color:white; padding:10px; text-align:center; border-radius:5px; margin-bottom:15px;"><strong>RENTA MENSUAL</strong></div>
-            <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span><strong>Renta:</strong></span><span>${formatoMoneda(res.rentaSoloActivo / 1.16)}</span></div>
-            <div style="display: flex; justify-content: space-between; background-color: #e9e9e9; padding: 4px;"><span><strong>GPS:</strong></span><span>${formatoMoneda(res.gpsFinMensual / 1.16)}</span></div>
-            <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span><strong>Seguro:</strong></span><span>${formatoMoneda(res.seguroFinMensual / 1.16)}</span></div>
-            <br/><br/>
-            <hr style="border-color:#dddddd; margin:15px 0;">
-            <div style="display: flex; justify-content: space-between;"><span><strong>Subtotal:</strong></span><span>${formatoMoneda(res.rentaMensualSubtotal)}</span></div>
-            <div style="display: flex; justify-content: space-between;"><span><strong>IVA:</strong></span><span>${formatoMoneda(res.rentaMensualIVA)}</span></div>
-            <div style="display:flex; justify-content:space-between; background-color:black; color:white; padding:10px; border-radius:5px; margin-top:15px; font-weight:bold; font-size:16px;">
-              <span><strong>Total renta mensual:</strong></span><span>${formatoMoneda(res.rentaMensualTotal)}</span>
-            </div>
-          </div>
-
-        </div>
-        <div style="margin-top: 20px;"><p><strong>Valor residual estimado:</strong> ${formatoMoneda(res.residualReal)}</p></div>
+      <!-- DATOS DEL CLIENTE: fuera de la banda gris, sobre fondo blanco -->
+      <div style="background-color: white; padding: 12px 24px 10px 24px; border-bottom: 2px solid #e0e0e0;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <tr>
+            <td style="padding: 3px 0; width: 180px; font-weight: 700; color: #222;">NOMBRE DEL CLIENTE</td>
+            <td style="padding: 3px 0; color: #444;">${formData.nombre_cliente || 'A quien corresponda'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 3px 0; font-weight: 700; color: #222;">PRODUCTO/VEHÍCULO</td>
+            <td style="padding: 3px 0; color: #444;">${formData.nombreActivo}</td>
+          </tr>
+          <tr>
+            <td style="padding: 3px 0; font-weight: 700; color: #222;">PRECIO (IVA INCLUIDO)</td>
+            <td style="padding: 3px 0; color: #444;">${formatoMoneda(formData.valorActivo)} MXN</td>
+          </tr>
+          <tr>
+            <td style="padding: 3px 0; font-weight: 700; color: #222;">PLAZO (MESES)</td>
+            <td style="padding: 3px 0; color: #444;">${formData.plazo}</td>
+          </tr>
+        </table>
       </div>
-    `;
 
-    // 2. Creamos un contenedor temporal en memoria
-    const container = document.createElement('div');
-    container.innerHTML = htmlContent;
+      <!-- TABLAS DE PAGO INICIAL Y RENTA MENSUAL -->
+      <div style="padding: 14px 24px; background: white;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr style="vertical-align: top;">
 
-    // 3. Nombramos el archivo (Si hay cliente, lo incluye, si no, genérico)
-    const nombreArchivo = formData.nombre_cliente 
-      ? `Cotizacion_${formData.nombre_cliente.replace(/\s+/g, '_')}.pdf`
-      : 'Cotizacion_Flising.pdf';
+            <!-- PAGO INICIAL -->
+            <td style="width: 49%; padding-right: 8px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+                <tr>
+                  <td colspan="2" style="background-color: #ea5533; color: white; padding: 6px 10px; font-weight: 700; font-size: 11px;">
+                    PAGO INICIAL
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Renta Extraordinaria</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.pagoInicialSub)}</td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Comisión por apertura</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.comisionSub)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">GPS</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.gpsSub)}</td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Seguro</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.seguroSub)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Gestoría trámites vehiculares</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.serviciosSub)}</td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Servicio y/o mantenimiento</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc;"><strong>Subtotal</strong></td>
+                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc; text-align: right; white-space: nowrap;"><strong>${formatoMoneda(res.pagoInicialSubtotal)}</strong></td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px;">IVA</td>
+                  <td style="padding: 5px 8px; text-align: right; white-space: nowrap;">${formatoMoneda(res.pagoInicialIVA)}</td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="background-color: #ea5533; color: white; padding: 6px 10px; font-weight: 700;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="font-size: 10.5px;">PAGO TOTAL INICIAL</td>
+                        <td style="text-align: right; white-space: nowrap;">${formatoMoneda(res.pagoInicialTotal)} MXN</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
 
-    // 4. Configuramos html2pdf para que se vea premium
-    const opciones = {
-      margin:       10,
-      filename:     nombreArchivo,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 }, // Da mejor resolución
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
+            <!-- RENTA MENSUAL -->
+            <td style="width: 49%; padding-left: 8px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+                <tr>
+                  <td colspan="2" style="background-color: #2c2c2c; color: white; padding: 6px 10px; font-weight: 700; font-size: 11px;">
+                    RENTA MENSUAL &nbsp;|&nbsp; PLAZO ${formData.plazo} MESES
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Renta</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.rentaSoloActivo / 1.16)}</td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">GPS</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.gpsFinMensual / 1.16)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Seguro</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.seguroFinMensual / 1.16)}</td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Gestoría trámites vehiculares</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Servicio y/o mantenimiento</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Otros</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc;"><strong>Subtotal</strong></td>
+                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc; text-align: right; white-space: nowrap;"><strong>${formatoMoneda(res.rentaMensualSubtotal)}</strong></td>
+                </tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding: 5px 8px;">IVA</td>
+                  <td style="padding: 5px 8px; text-align: right; white-space: nowrap;">${formatoMoneda(res.rentaMensualIVA)}</td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="background-color: #2c2c2c; color: white; padding: 6px 10px; font-weight: 700;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="font-size: 10.5px;">PAGO TOTAL RENTA MENSUAL</td>
+                        <td style="text-align: right; white-space: nowrap;">${formatoMoneda(res.rentaMensualTotal)} MXN</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
 
-    // 5. ¡Ejecutamos la descarga mágica!
-    html2pdf().set(opciones).from(container).save();
+              <!-- VALOR RESIDUAL -->
+              <div style="margin-top: 8px; background-color: transparent; color: black; padding: 8px 10px; font-weight: 700; font-size: 10.5px; text-align: right;">
+                VALOR RESIDUAL ESTIMADO<br/>
+                <span style="font-weight: 400;">${formatoMoneda(res.residualReal)}</span>
+              </div>
+            </td>
+
+          </tr>
+        </table>
+      </div>
+
+      <!-- OBSERVACIONES Y NOTAS -->
+      <div style="padding: 0px 24px 8px 24px; background: white; font-size: 9.5px; color: #333; line-height: 1.5;">
+        <p style="font-weight: 700; margin: 6px 0 3px 0;">OBSERVACIONES</p>
+        <ul style="margin: 0; padding-left: 14px;">
+          <li>- Sujeto a aprobación de crédito.</li>
+          <li>- Cotización sujeta a cambios sin previo aviso.</li>
+          <li>- Seguro y GPS obligatorio a cargo del cliente con renovaciones anuales (en caso de aplicar) cobertura amplia.</li>
+          <li>- El valor de la tenencia y/o impuestos gubernamentales es estimado, sujeto a la fórmula gubernamental vigente y a la fecha de entrega de la unidad.</li>
+          <li>- Sujeto a disponibilidad del activo en sus variantes y/o colores, así como su valor.</li>
+        </ul>
+        <p style="font-weight: 700; margin: 8px 0 3px 0;">NOTAS</p>
+        <ul style="margin: 0; padding-left: 14px;">
+          <li>- Oferta preliminar sujeta a modificación según evaluación crediticia. Las condiciones definitivas se establecerán después de concluir satisfactoriamente el proceso de precalificación.</li>
+          <li>- Al pago inicial se le suma el pago del seguro anual una vez que se confirme el precio de este o en caso de ser financiado, la parte que corresponda.</li>
+          <li>- 1er renta deberá ser pagada antes o a la entrega del bien arrendado.</li>
+          <li>- El Arrendatario pagará las rentas proporcionales que se generen entre el día de entrega del vehículo y la fecha de inicio del arrendamiento.</li>
+          <li>- El pago mensual es domiciliado el día 1 de cada mes.</li>
+        </ul>
+      </div>
+
+      <!-- FIRMA / CIERRE -->
+      <div style="padding: 6px 24px 14px 24px; background: white; font-size: 9.5px; color: #333; line-height: 1.6;">
+        <p style="font-weight: 700; color: #ea5533; margin: 0 0 4px 0; text-align: center; font-size: 10px;">
+          ¡Estamos encantados de resolver cualquier duda o comentario que tengas!
+        </p>
+        <p style="margin: 0;">
+          He leído y entiendo plenamente las condiciones y disposiciones contenidas en la presente cotización, estoy de acuerdo.
+        </p>
+        <p style="margin: 5px 0 0 0;">
+          <strong>${formData.nombre_cliente || 'A quien corresponda'}</strong>&nbsp;&nbsp;
+          Metepec, Edo. de México, a ${fechaHoy}
+        </p>
+        <p style="margin: 6px 0 0 0; font-size: 9px; color: #555;">
+          Estimado cliente, te invitamos a leer nuestro
+          <span style="color: #ea5533;">Aviso de privacidad y transferencia de datos personales</span>;
+          y <span style="color: #ea5533;">Términos y condiciones generales del arrendamiento puro</span>.
+        </p>
+      </div>
+
+      <!-- FRANJA INFERIOR GRIS -->
+      <div style="margin-top: auto; background-color: #2c2c2c; box-sizing: border-box; padding: 2px 24px; display: flex; align-items: center; justify-content: center;">
+        <img
+          src="/branding/flising-logo-blanco.png"
+          alt="Flising"
+          style="height: 70px; object-fit: contain;"
+          onerror="this.style.display='none'"
+        />
+        <span style="color: #aaa; font-size: 10px; margin-left: 16px;">www.flising.com</span>
+      </div>
+
+    </div>
+  `;
+
+  const container = document.createElement('div');
+  container.innerHTML = htmlContent;
+
+  const nombreArchivo = formData.nombre_cliente
+    ? `Cotizacion_${formData.nombre_cliente.replace(/\s+/g, '_')}.pdf`
+    : 'Cotizacion_Flising.pdf';
+
+  const opciones = {
+    margin: 0,
+    filename: nombreArchivo,
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, allowTaint: false, width: 794, windowWidth: 794 },
+    pagebreak: { mode: 'avoid-all' },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
   };
+
+  html2pdf().set(opciones).from(container).save();
+};
 
   const formatoMoneda = (monto) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
   
