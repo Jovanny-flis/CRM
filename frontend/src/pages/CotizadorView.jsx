@@ -656,6 +656,17 @@ const imprimirPDF = () => {
             </div>
           </div>
 
+          <div className="bg-black rounded-3xl p-6 shadow-xl text-white border border-slate-800">
+            <h2 className="text-sm font-bold text-slate-400 mb-4 uppercase tracking-wider">
+              Valor Residual
+            </h2>
+            <div className="bg-slate-900 p-4 rounded-xl flex justify-center items-center border border-slate-800">
+              <span className="font-black text-2xl text-white tabular-nums">
+                {formatoMoneda(res.residualReal)}
+              </span>
+            </div>
+          </div>
+
           <div className="flex gap-3">
             <button 
               onClick={handleGuardarCotizacion} 
