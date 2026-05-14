@@ -1,4 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -52,9 +54,10 @@ const Sidebar = () => {
   const menuPermitido = menuItems.filter(item => item.roles.includes(usuario.rol));
 
   // 4. Función para cerrar sesión con un clic
-  const cerrarSesion = () => {
-    localStorage.removeItem('usuarioCRM'); // Destruimos el gafete
-    window.location.reload(); // Recargamos la página para que el "cadenero" de App.jsx actúe
+  const cerrarSesion = async () => {
+    await signOut(auth);
+    localStorage.removeItem('usuarioCRM');
+    window.location.replace('/');
   };
 
   return (
