@@ -1,6 +1,48 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
-import html2pdf from 'html2pdf.js'; // <--- AGREGA ESTA LÍNEA
+import html2pdf from 'html2pdf.js';
+
+/** A4 @ 96dpi — dimensiones fijas para PDF consistente entre navegadores */
+const PDF_ANCHO_PX = 794;
+const PDF_ALTO_A4_PX = 1122;
+const PDF_ESCALA_CANVAS = 2;
+
+const esperarRecursosPdf = (elemento) => {
+  const promesas = [];
+  if (document.fonts?.ready) promesas.push(document.fonts.ready);
+  elemento.querySelectorAll('img').forEach((img) => {
+    if (img.complete) return;
+    promesas.push(
+      new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+      })
+    );
+  });
+  return Promise.all(promesas);
+};
+
+const montarContenedorPdf = (htmlContent) => {
+  const wrapper = document.createElement('div');
+  wrapper.setAttribute('aria-hidden', 'true');
+  wrapper.style.cssText = [
+    'position:fixed',
+    'left:-10000px',
+    'top:0',
+    `width:${PDF_ANCHO_PX}px`,
+    'overflow:hidden',
+    'background:#fff',
+    'z-index:-1',
+  ].join(';');
+
+  const host = document.createElement('div');
+  host.innerHTML = htmlContent;
+  wrapper.appendChild(host);
+  document.body.appendChild(wrapper);
+
+  const root = host.firstElementChild;
+  return { wrapper, root };
+};
 
 // --- TABLAS DE TOPES RESIDUALES (Directas de tu código) ---
 const tablaResidual = [
@@ -36,6 +78,7 @@ const CotizadorView = () => {
   const [historial, setHistorial] = useState([]); 
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
+  const [generandoPdf, setGenerandoPdf] = useState(false);
 
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
@@ -285,22 +328,27 @@ const CotizadorView = () => {
     }
   };
 
-const imprimirPDF = () => {
-  if (Object.keys(errores).length > 0 || !formData.valorActivo)
-    return alert("Completa la cotización sin errores.");
+  const imprimirPDF = async () => {
+    if (Object.keys(errores).length > 0 || !formData.valorActivo)
+      return alert("Completa la cotización sin errores.");
+    if (generandoPdf) return;
 
-  const fechaHoy = new Date().toLocaleDateString('es-MX', {
-    day: '2-digit', month: 'long', year: 'numeric'
-  });
+    setGenerandoPdf(true);
+    let wrapper = null;
 
-  const htmlContent = `
-    <div style="font-family: Arial, sans-serif; font-size: 10px; background: white; width: 794px; height: 1122px; margin: 0; padding: 0; display: flex; flex-direction: column; box-sizing: border-box;">
+    const fechaHoy = new Date().toLocaleDateString('es-MX', {
+      day: '2-digit', month: 'long', year: 'numeric'
+    });
+    const logoUrl = `${window.location.origin}/branding/flising-logo-blanco.png`;
+
+    const htmlContent = `
+    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif; font-size: 10px; background: white; width: ${PDF_ANCHO_PX}px; min-height: ${PDF_ALTO_A4_PX}px; margin: 0; padding: 0; display: flex; flex-direction: column; box-sizing: border-box;">
 
       <!-- BANDA SUPERIOR GRIS: sin border-radius, ocupa todo el ancho -->
       <div style="background-color: #2c2c2c; padding: 5px 24px 20px 24px; margin: 0;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
           <img
-            src="/branding/flising-logo-blanco.png"
+            src="${logoUrl}"
             alt="Flising"
             style="height: 110px; object-fit: contain;"
             onerror="this.style.display='none'"
@@ -503,7 +551,7 @@ const imprimirPDF = () => {
       <!-- FRANJA INFERIOR GRIS -->
       <div style="margin-top: auto; background-color: #2c2c2c; box-sizing: border-box; padding: 2px 24px; display: flex; align-items: center; justify-content: center;">
         <img
-          src="/branding/flising-logo-blanco.png"
+          src="${logoUrl}"
           alt="Flising"
           style="height: 70px; object-fit: contain;"
           onerror="this.style.display='none'"
@@ -514,24 +562,52 @@ const imprimirPDF = () => {
     </div>
   `;
 
-  const container = document.createElement('div');
-  container.innerHTML = htmlContent;
+    const nombreArchivo = formData.nombre_cliente
+      ? `Cotizacion_${formData.nombre_cliente.replace(/\s+/g, '_')}.pdf`
+      : 'Cotizacion_Flising.pdf';
 
-  const nombreArchivo = formData.nombre_cliente
-    ? `Cotizacion_${formData.nombre_cliente.replace(/\s+/g, '_')}.pdf`
-    : 'Cotizacion_Flising.pdf';
+    try {
+      const montado = montarContenedorPdf(htmlContent);
+      wrapper = montado.wrapper;
+      const { root } = montado;
 
-  const opciones = {
-    margin: 0,
-    filename: nombreArchivo,
-    image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, allowTaint: false, width: 794, windowWidth: 794 },
-    pagebreak: { mode: 'avoid-all' },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      await esperarRecursosPdf(root);
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+
+      const altoPx = Math.ceil(root.scrollHeight);
+      root.style.width = `${PDF_ANCHO_PX}px`;
+      root.style.height = `${altoPx}px`;
+
+      const opciones = {
+        margin: 0,
+        filename: nombreArchivo,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: PDF_ESCALA_CANVAS,
+          useCORS: true,
+          allowTaint: false,
+          width: PDF_ANCHO_PX,
+          height: altoPx,
+          windowWidth: PDF_ANCHO_PX,
+          windowHeight: altoPx,
+          scrollX: 0,
+          scrollY: 0,
+        },
+        pagebreak: { mode: ['css', 'legacy'] },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      };
+
+      await html2pdf().set(opciones).from(root).save();
+    } catch (error) {
+      console.error('Error al generar PDF:', error);
+      alert('No se pudo generar el PDF. Intenta de nuevo.');
+    } finally {
+      wrapper?.remove();
+      setGenerandoPdf(false);
+    }
   };
-
-  html2pdf().set(opciones).from(container).save();
-};
 
   const formatoMoneda = (monto) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
   
@@ -849,10 +925,10 @@ const imprimirPDF = () => {
             </button>
             <button 
               onClick={imprimirPDF} 
-              disabled={Object.keys(errores).length > 0} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${Object.keys(errores).length > 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
+              disabled={Object.keys(errores).length > 0 || generandoPdf} 
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${Object.keys(errores).length > 0 || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
             >
-              📄 Generar PDF
+              {generandoPdf ? 'Generando PDF…' : '📄 Generar PDF'}
             </button>
           </div>
         </div>
