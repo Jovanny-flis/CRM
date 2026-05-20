@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
 import { Users, User, Check, ChevronDown } from 'lucide-react';
+
+const esLeadActivo = (lead) => lead.activo !== 0 && lead.activo !== false;
+
 function LeadsView() {
   const [leads, setLeads] = useState([]);
   const [medios, setMedios] = useState([]);
@@ -31,6 +34,10 @@ function LeadsView() {
   const [filtroAgente, setFiltroAgente] = useState(
     usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : ''
   );
+  const [filtroActivo, setFiltroActivo] = useState('activos');
+  const [leadActivoEnEdicion, setLeadActivoEnEdicion] = useState(true);
+  const [motivoDesactivacion, setMotivoDesactivacion] = useState('');
+  const [mostrarAvisoDesactivacion, setMostrarAvisoDesactivacion] = useState(false);
 
   const fetchTablero = () => {
     if (!empresaId) {
@@ -79,10 +86,14 @@ function LeadsView() {
     setIsModalOpen(false);
     setLeadEditando(null);
     setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', usuario_id: '' });
+    setLeadActivoEnEdicion(true);
+    setMotivoDesactivacion('');
+    setMostrarAvisoDesactivacion(false);
   };
 
   // NUEVA FUNCIÓN: Abre el modal con los datos del lead a editar
   const abrirModalEditar = (lead) => {
+    if (!esLeadActivo(lead)) return;
     setLeadEditando(lead.id);
     setFormData({
       nombre: lead.nombre || '',
@@ -92,7 +103,24 @@ function LeadsView() {
       medio: lead.medio || '',
       usuario_id: lead.usuario_id || ''
     });
+    setLeadActivoEnEdicion(true);
+    setMotivoDesactivacion('');
+    setMostrarAvisoDesactivacion(false);
     setIsModalOpen(true);
+  };
+
+  const handleToggleActivo = (marcarActivo) => {
+    if (marcarActivo) {
+      setLeadActivoEnEdicion(true);
+      setMotivoDesactivacion('');
+      return;
+    }
+    setMostrarAvisoDesactivacion(true);
+  };
+
+  const confirmarAvisoDesactivacion = () => {
+    setMostrarAvisoDesactivacion(false);
+    setLeadActivoEnEdicion(false);
   };
 
   const handleSubmit = (e) => {
@@ -103,6 +131,11 @@ function LeadsView() {
     
     // Si estamos EDITANDO
     if (leadEditando) {
+      if (!leadActivoEnEdicion && !motivoDesactivacion.trim()) {
+        alert('Indica el motivo de desactivación antes de guardar.');
+        return;
+      }
+
       const datosActualizados = {
         nombre: formData.nombre,
         correo: formData.correo,
@@ -112,12 +145,20 @@ function LeadsView() {
         usuario_id: agenteAsignado
       };
 
+      if (!leadActivoEnEdicion) {
+        datosActualizados.activo = 0;
+        datosActualizados.motivo_desactivacion = motivoDesactivacion.trim();
+      }
+
       api.put(`/leads/${leadEditando}`, datosActualizados)
         .then(() => {
           fetchTablero();
           cerrarModal();
         })
-        .catch(err => alert("Error al actualizar: " + err.message));
+        .catch(err => {
+          const msg = err.response?.data?.error || err.message;
+          alert("Error al actualizar: " + msg);
+        });
     } 
     // Si estamos CREANDO
     else {
@@ -144,12 +185,15 @@ function LeadsView() {
 
 const obtenerLeadsPorEtapaId = (stageId) => {
     return leads.filter(lead => {
-      // 1. Verificamos que esté en la columna correcta
       const esDeLaEtapa = lead.stage_id === stageId;
-      // 2. Verificamos que sea del agente filtrado (o si el filtro está vacío, mostramos todos)
       const esDelAgente = filtroAgente === '' || lead.usuario_id === filtroAgente;
-      
-      return esDeLaEtapa && esDelAgente;
+      const activo = esLeadActivo(lead);
+      const cumpleFiltroActivo =
+        filtroActivo === 'ambos' ||
+        (filtroActivo === 'activos' && activo) ||
+        (filtroActivo === 'inactivos' && !activo);
+
+      return esDeLaEtapa && esDelAgente && cumpleFiltroActivo;
     });
   };
 
@@ -175,11 +219,15 @@ const handleDragStart = (e, leadId) => {
   const handleDrop = (e, targetStageId) => {
     e.preventDefault();
     const leadId = e.dataTransfer.getData("leadId");
-    
-    if (leadId) {
+    const lead = leads.find(l => l.id === leadId);
+
+    if (leadId && lead && esLeadActivo(lead)) {
       api.put(`/leads/${leadId}/etapa`, { stage_id: targetStageId })
         .then(() => fetchTablero())
-        .catch(err => console.error("❌ Error al mover:", err));
+        .catch(err => {
+          const msg = err.response?.data?.error || err.message;
+          console.error("❌ Error al mover:", msg);
+        });
     }
   };
 
@@ -277,7 +325,17 @@ const handleDragStart = (e, leadId) => {
 )}
       
 
-          {/* 🟢 EL BOTÓN ESTÁ AFUERA PARA QUE EL AGENTE TAMBIÉN LO VEA */}
+          <select
+            value={filtroActivo}
+            onChange={(e) => setFiltroActivo(e.target.value)}
+            className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm min-w-[160px]"
+            aria-label="Filtrar por estado del lead"
+          >
+            <option value="activos">Solo activos</option>
+            <option value="inactivos">Solo inactivos</option>
+            <option value="ambos">Activos e inactivos</option>
+          </select>
+
           <button 
             onClick={() => { setLeadEditando(null); setIsModalOpen(true); }}
             disabled={etapas.length === 0}
@@ -324,36 +382,54 @@ const handleDragStart = (e, leadId) => {
               </div>
 
               <div className="space-y-3 min-h-[150px]">
-                {leadsFiltrados.map(lead => (
+                {leadsFiltrados.map(lead => {
+                  const activo = esLeadActivo(lead);
+                  return (
                   <div 
                     key={lead.id} 
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, lead.id)}
-                    onDragEnd={handleDragEnd}
-                    className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing group relative overflow-hidden transition-shadow"
+                    draggable={activo}
+                    onDragStart={activo ? (e) => handleDragStart(e, lead.id) : undefined}
+                    onDragEnd={activo ? handleDragEnd : undefined}
+                    className={`p-4 rounded-xl shadow-sm border group relative overflow-hidden transition-shadow ${
+                      activo
+                        ? 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing'
+                        : 'bg-slate-100 border-slate-300 opacity-75 grayscale cursor-default'
+                    }`}
                   >
-                    <div className="absolute left-0 top-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: etapa.color_hex || '#3b82f6' }}></div>
+                    <div className="absolute left-0 top-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: activo ? (etapa.color_hex || '#3b82f6') : '#94a3b8' }}></div>
                     
-                    {/* Botón flotante para Editar */}
-                    <button 
-                      onClick={() => abrirModalEditar(lead)}
-                      className="absolute top-3 right-3 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-md p-1"
-                      title="Editar Prospecto"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                    </button>
+                    {activo && (
+                      <button 
+                        type="button"
+                        onClick={() => abrirModalEditar(lead)}
+                        className="absolute top-3 right-3 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-md p-1"
+                        title="Editar Prospecto"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                      </button>
+                    )}
+
+                    {!activo && (
+                      <span className="absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200 px-2 py-0.5 rounded">
+                        Inactivo
+                      </span>
+                    )}
                     
-                    <div className="flex justify-between items-start mb-1 pr-6">
-                      <p className="text-slate-900 font-bold text-sm truncate">{lead.nombre || "Sin nombre"}</p>
+                    <div className={`flex justify-between items-start mb-1 ${activo ? 'pr-6' : 'pr-16'}`}>
+                      <p className={`font-bold text-sm truncate ${activo ? 'text-slate-900' : 'text-slate-500'}`}>{lead.nombre || "Sin nombre"}</p>
                     </div>
 
                     <div className="mb-2">
                       {parseFloat(lead.valor) > 0 && (
-                        <span className="text-green-700 font-bold text-[11px] bg-green-50 px-2 py-0.5 rounded-md border border-green-200 whitespace-nowrap inline-block mb-1">
+                        <span className={`font-bold text-[11px] px-2 py-0.5 rounded-md border whitespace-nowrap inline-block mb-1 ${
+                          activo
+                            ? 'text-green-700 bg-green-50 border-green-200'
+                            : 'text-slate-500 bg-slate-200 border-slate-300'
+                        }`}>
                           {formatoMoneda(lead.valor)}
                         </span>
                       )}
-                      <p className="text-slate-500 text-[11px] truncate">{lead.correo || 'Sin correo'}</p>
+                      <p className={`text-[11px] truncate ${activo ? 'text-slate-500' : 'text-slate-400'}`}>{lead.correo || 'Sin correo'}</p>
                     </div>
                     
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
@@ -370,12 +446,30 @@ const handleDragStart = (e, leadId) => {
                       </span>
                     </div>
                   </div>
-                ))}
+                );
+                })}
               </div>
             </div>
           );
         })}
       </div>
+
+      {mostrarAvisoDesactivacion && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+            <p className="text-slate-800 font-semibold text-lg leading-relaxed">
+              Si se guardan los cambios no se podrá activar de nuevo este lead.
+            </p>
+            <button
+              type="button"
+              onClick={confirmarAvisoDesactivacion}
+              className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
@@ -443,6 +537,48 @@ const handleDragStart = (e, leadId) => {
                     </select>
                   </div>
                 </div>
+
+                {leadEditando && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lead activo</p>
+                        <p className="text-sm text-slate-600 mt-0.5">Desactivar es permanente al guardar</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={leadActivoEnEdicion}
+                        onClick={() => handleToggleActivo(!leadActivoEnEdicion)}
+                        className={`relative inline-flex h-7 w-12 shrink-0 rounded-full transition-colors ${
+                          leadActivoEnEdicion ? 'bg-blue-600' : 'bg-slate-400'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform mt-1 ${
+                            leadActivoEnEdicion ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {!leadActivoEnEdicion && (
+                      <div className="mt-4 animate-in fade-in slide-in-from-top-1">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                          ¿Por qué se desactiva este lead? *
+                        </label>
+                        <textarea
+                          required
+                          value={motivoDesactivacion}
+                          onChange={(e) => setMotivoDesactivacion(e.target.value)}
+                          rows={3}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm"
+                          placeholder="Describe el motivo..."
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {(usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
                   <div className="animate-in fade-in slide-in-from-top-1">

@@ -449,8 +449,8 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
     }
 
     const query = `
-        INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id) 
-        VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, activo, stage_id, usuario_id) 
+        VALUES (UUID(), ?, ?, ?, ?, ?, ?, 1, ?, ?)
     `;
     
     pool.query(query, [
@@ -458,7 +458,7 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
         nombre, 
         correo, 
         telefono, 
-        valor || 0, // <--- Aquí guardamos el valor (si viene vacío, pone 0)
+        valor || 0,
         medio, 
         stage_id || null, 
         usuario_id || null
@@ -478,20 +478,54 @@ app.put('/api/leads/:id',
     validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
     (req, res) => {
     const { id } = req.params;
-    const { nombre, correo, telefono, valor, medio, usuario_id } = req.body;
-    
-    const query = `
-        UPDATE leads 
-        SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ? 
-        WHERE id = ?
-    `;
-    
-    pool.query(query, [nombre, correo, telefono, valor, medio, usuario_id, id], (error) => {
-        if (error) {
-            console.error("❌ ERROR AL ACTUALIZAR LEAD:", error.sqlMessage || error);
-            return res.status(500).json({ error: error.sqlMessage || "Error al actualizar en BD" });
+    const { nombre, correo, telefono, valor, medio, usuario_id, activo, motivo_desactivacion } = req.body;
+
+    pool.query('SELECT activo FROM leads WHERE id = ?', [id], (errSel, filas) => {
+        if (errSel) return res.status(500).json({ error: errSel.message });
+        if (!filas.length) return res.status(404).json({ error: 'Lead no encontrado' });
+
+        const leadActual = filas[0];
+        if (leadActual.activo === 0) {
+            return res.status(400).json({ error: 'No se puede editar un lead inactivo.' });
         }
-        res.status(200).json({ mensaje: "Lead actualizado con éxito" });
+
+        const desactivar = activo === 0 || activo === false;
+        if (desactivar) {
+            const motivo = (motivo_desactivacion || '').trim();
+            if (!motivo) {
+                return res.status(400).json({ error: 'El motivo de desactivación es obligatorio.' });
+            }
+            const queryDesactivar = `
+                UPDATE leads
+                SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?,
+                    activo = 0, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `;
+            return pool.query(
+                queryDesactivar,
+                [nombre, correo, telefono, valor, medio, usuario_id, motivo, id],
+                (error) => {
+                    if (error) {
+                        console.error("❌ ERROR AL DESACTIVAR LEAD:", error.sqlMessage || error);
+                        return res.status(500).json({ error: error.sqlMessage || "Error al actualizar en BD" });
+                    }
+                    res.status(200).json({ mensaje: "Lead desactivado con éxito" });
+                }
+            );
+        }
+
+        const query = `
+            UPDATE leads
+            SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?
+            WHERE id = ?
+        `;
+        pool.query(query, [nombre, correo, telefono, valor, medio, usuario_id, id], (error) => {
+            if (error) {
+                console.error("❌ ERROR AL ACTUALIZAR LEAD:", error.sqlMessage || error);
+                return res.status(500).json({ error: error.sqlMessage || "Error al actualizar en BD" });
+            }
+            res.status(200).json({ mensaje: "Lead actualizado con éxito" });
+        });
     });
 });
 
@@ -514,10 +548,19 @@ app.put('/api/leads/:id/etapa',
     (req, res) => {
     const { id } = req.params;
     const { stage_id } = req.body;
-    const query = 'UPDATE leads SET stage_id = ? WHERE id = ?';
-    pool.query(query, [stage_id, id], (error) => {
-        if (error) return res.status(500).json({ error: error.message });
-        res.status(200).json({ mensaje: '🚀 Lead movido con éxito' });
+
+    pool.query('SELECT activo FROM leads WHERE id = ?', [id], (errSel, filas) => {
+        if (errSel) return res.status(500).json({ error: errSel.message });
+        if (!filas.length) return res.status(404).json({ error: 'Lead no encontrado' });
+        if (filas[0].activo === 0) {
+            return res.status(400).json({ error: 'No se puede mover un lead inactivo.' });
+        }
+
+        const query = 'UPDATE leads SET stage_id = ? WHERE id = ?';
+        pool.query(query, [stage_id, id], (error) => {
+            if (error) return res.status(500).json({ error: error.message });
+            res.status(200).json({ mensaje: '🚀 Lead movido con éxito' });
+        });
     });
 });
 
@@ -667,7 +710,7 @@ app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
 app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
 
-    let leadsQuery = 'SELECT COUNT(*) as totalLeads, SUM(valor) as totalValor FROM leads WHERE empresa_id = ?';
+    let leadsQuery = 'SELECT COUNT(*) as totalLeads, SUM(valor) as totalValor FROM leads WHERE empresa_id = ? AND activo = 1';
     let cotizacionesQuery = 'SELECT COUNT(*) as totalCotizaciones FROM cotizaciones WHERE empresa_id = ?';
 
     const params = [empresa_id];
