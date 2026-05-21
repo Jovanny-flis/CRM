@@ -5,6 +5,11 @@ import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 
 const esLeadActivo = (lead) => lead.activo !== 0 && lead.activo !== false;
 
+const valorEstimadoValido = (valor) => {
+  const n = parseFloat(valor);
+  return Number.isFinite(n) && n > 0;
+};
+
 function LeadsView() {
   const [leads, setLeads] = useState([]);
   const [medios, setMedios] = useState([]);
@@ -127,6 +132,13 @@ function LeadsView() {
   const handleSubmit = (e) => {
     e.preventDefault();
 
+    if (!valorEstimadoValido(formData.valor)) {
+      alert('El valor estimado es obligatorio y debe ser mayor a cero.');
+      return;
+    }
+
+    const valorNumerico = parseFloat(formData.valor);
+
     // Determinar el agente asignado (Agentes se auto-asignan, Admins eligen)
     const agenteAsignado = usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : formData.usuario_id;
     
@@ -141,7 +153,7 @@ function LeadsView() {
         nombre: formData.nombre,
         correo: formData.correo,
         telefono: formData.telefono,
-        valor: formData.valor ? parseFloat(formData.valor) : 0,
+        valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
         usuario_id: agenteAsignado
       };
@@ -169,7 +181,7 @@ function LeadsView() {
         nombre: formData.nombre,
         correo: formData.correo,
         telefono: formData.telefono,
-        valor: formData.valor ? parseFloat(formData.valor) : 0,
+        valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
         stage_id: primeraEtapaId,
         usuario_id: agenteAsignado
@@ -180,7 +192,10 @@ function LeadsView() {
           fetchTablero(); 
           cerrarModal();
         })
-        .catch(err => alert("Error al guardar: " + err.message));
+        .catch(err => {
+          const msg = err.response?.data?.error || err.message;
+          alert("Error al guardar: " + msg);
+        });
     }
   };
 
@@ -505,9 +520,9 @@ const handleDragStart = (e, leadId) => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 text-green-600">Valor Estimado ($)</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 text-green-600">Valor Estimado ($) *</label>
                     <input 
-                      type="number" min="0" step="0.01" 
+                      type="number" required min="0.01" step="0.01" 
                       value={formData.valor} 
                       onChange={(e) => setFormData({...formData, valor: e.target.value})} 
                       className="w-full bg-green-50 border border-green-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-green-500 font-bold text-green-700" 

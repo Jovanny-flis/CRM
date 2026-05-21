@@ -32,6 +32,11 @@ const puedeOperarEnEmpresa = (usuarioCRM, empresaIdObjetivo) => {
     return Number(usuarioCRM.empresa_id) === Number(empresaIdObjetivo);
 };
 
+const valorEstimadoValido = (valor) => {
+    const n = Number(valor);
+    return Number.isFinite(n) && n > 0;
+};
+
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
 const corsOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
@@ -449,6 +454,10 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
         return res.status(403).json({ error: 'No puedes crear leads en otra empresa.' });
     }
 
+    if (!valorEstimadoValido(valor)) {
+        return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
+    }
+
     const query = `
         INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, activo, stage_id, usuario_id) 
         VALUES (UUID(), ?, ?, ?, ?, ?, ?, 1, ?, ?)
@@ -459,7 +468,7 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
         nombre, 
         correo, 
         telefono, 
-        valor || 0,
+        valor,
         medio, 
         stage_id || null, 
         usuario_id || null
@@ -488,6 +497,10 @@ app.put('/api/leads/:id',
         const leadActual = filas[0];
         if (leadActual.activo === 0) {
             return res.status(400).json({ error: 'No se puede editar un lead inactivo.' });
+        }
+
+        if (!valorEstimadoValido(valor)) {
+            return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
         }
 
         const desactivar = activo === 0 || activo === false;
