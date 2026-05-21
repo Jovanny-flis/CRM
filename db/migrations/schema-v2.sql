@@ -15,7 +15,7 @@
 --   • Semilla activo/cancelado y asignación estatus_id en leads existentes
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
---   • lib/canales.js — raíces faltantes en GET /medios
+--   • lib/canales.js — catálogo raíz al crear empresa (POST /empresas); no re-sembrar en GET /medios
 --   • lib/estatus-leads.js — estatus sistema y leads sin estatus_id en GET leads/estatus
 -- =============================================================================
 

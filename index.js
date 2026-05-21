@@ -16,7 +16,7 @@ const {
 const pool = require('./db');
 require('./firebase');
 const admin = require('firebase-admin');
-const { asegurarCatalogoCanales } = require('./lib/canales');
+const { sembrarCanalesDefaultEmpresa } = require('./lib/canales');
 const {
     CODIGO_ACTIVO,
     CODIGO_CANCELADO,
@@ -293,18 +293,25 @@ app.delete('/api/usuarios/:id', verificarToken, revisarRol(['super_admin','admin
 // RUTAS DE GESTIÓN DE EMPRESAS (Super Admin)
 // ==========================================
 
-app.post('/api/empresas', verificarToken,revisarRol(['super_admin']),(req, res) => {
+app.post('/api/empresas', verificarToken, revisarRol(['super_admin']), async (req, res) => {
     const { nombre_comercial, rfc, direccion, telefono, correo, color_principal, color_secundario } = req.body;
-    if (!nombre_comercial) return res.status(400).json({ error: "Nombre comercial es requerido" });
+    if (!nombre_comercial) return res.status(400).json({ error: 'Nombre comercial es requerido' });
 
     const query = `INSERT INTO empresas 
     (nombre_comercial, rfc, direccion, telefono, correo, color_principal, color_secundario) 
     VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
-    pool.query(query, [nombre_comercial, rfc, direccion, telefono, correo, color_principal, color_secundario], (err, result) => {
-        if (err) return res.status(500).json({ error: err.sqlMessage });
-        res.status(201).json({ mensaje: 'Empresa guardada', id: result.insertId });
-    });
+    try {
+        const [result] = await pool.promise().query(query, [
+            nombre_comercial, rfc, direccion, telefono, correo, color_principal, color_secundario,
+        ]);
+        const empresaId = result.insertId;
+        await sembrarCanalesDefaultEmpresa(pool, empresaId);
+        res.status(201).json({ mensaje: 'Empresa guardada', id: empresaId });
+    } catch (err) {
+        console.error('❌ Error al crear empresa:', err.message);
+        res.status(500).json({ error: err.sqlMessage || err.message });
+    }
 });
 
 app.get('/api/empresas', verificarToken, revisarRol(['super_admin']),(req, res) => {
@@ -781,25 +788,17 @@ app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','su
     const { empresa_id } = req.params;
 
     try {
-        await asegurarCatalogoCanales(pool, empresa_id);
-    } catch (errSeed) {
-        console.error('🚨 Error al sembrar canales:', errSeed.message);
-        return res.status(500).json({ error: 'No se pudo inicializar el catálogo de canales.' });
+        const [resultados] = await pool.promise().query(
+            `SELECT * FROM lead_sources
+             WHERE empresa_id = ?
+             ORDER BY COALESCE(parent_id, id), parent_id IS NOT NULL, nombre ASC`,
+            [empresa_id],
+        );
+        res.status(200).json(resultados);
+    } catch (error) {
+        console.error('🚨 ¡ERROR EN MEDIOS! ->', error.message);
+        res.status(500).json({ error: error.message });
     }
-
-    pool.query(
-        `SELECT * FROM lead_sources
-         WHERE empresa_id = ?
-         ORDER BY COALESCE(parent_id, id), parent_id IS NOT NULL, nombre ASC`,
-        [empresa_id],
-        (error, resultados) => {
-            if (error) {
-                console.error('🚨 ¡ERROR EN MEDIOS! ->', error.message);
-                return res.status(500).json({ error: error.message });
-            }
-            res.status(200).json(resultados);
-        },
-    );
 });
 
 app.post('/api/medios', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), async (req, res) => {
