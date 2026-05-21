@@ -3,7 +3,7 @@ import api from '../api';
 import { Users, User, Check, ChevronDown } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 
-const esLeadActivo = (lead) => lead.activo !== 0 && lead.activo !== false;
+const CODIGO_CANCELADO = 'cancelado';
 
 const valorEstimadoValido = (valor) => {
   const n = parseFloat(valor);
@@ -14,6 +14,7 @@ function LeadsView() {
   const [leads, setLeads] = useState([]);
   const [medios, setMedios] = useState([]);
   const [etapas, setEtapas] = useState([]);
+  const [estatusList, setEstatusList] = useState([]);
   const [agentes, setAgentes] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [menuAgentesAbierto, setMenuAgentesAbierto] = useState(false);
@@ -29,7 +30,8 @@ function LeadsView() {
     telefono: '', 
     valor: '', 
     medio: '',
-    usuario_id: ''
+    usuario_id: '',
+    estatus_id: ''
   });
 
   // 2. SEGUNDO leemos quién es el usuario logueado
@@ -40,10 +42,11 @@ function LeadsView() {
   const [filtroAgente, setFiltroAgente] = useState(
     usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : ''
   );
-  const [filtroActivo, setFiltroActivo] = useState('activos');
-  const [leadActivoEnEdicion, setLeadActivoEnEdicion] = useState(true);
+  const [filtroEstatusIds, setFiltroEstatusIds] = useState([]);
+  const [menuEstatusAbierto, setMenuEstatusAbierto] = useState(false);
   const [motivoDesactivacion, setMotivoDesactivacion] = useState('');
-  const [mostrarAvisoDesactivacion, setMostrarAvisoDesactivacion] = useState(false);
+  const [mostrarAvisoCancelacion, setMostrarAvisoCancelacion] = useState(false);
+  const [estatusOriginalCodigo, setEstatusOriginalCodigo] = useState('activo');
 
   const fetchTablero = () => {
     if (!empresaId) {
@@ -53,26 +56,42 @@ function LeadsView() {
 
     api.get(`/pipelines/${empresaId}`)
       .then(resPipeline => {
-        if (resPipeline.data.length === 0) {
-           setCargando(false);
-           return;
-        }
-
-        const pipelineId = resPipeline.data[0].id; 
-
-        Promise.all([
+        const baseRequests = [
           api.get(`/leads/${empresaId}`),
           api.get(`/medios/${empresaId}`),
+          api.get(`/usuarios/empresa/${empresaId}`),
+          api.get(`/estatus-leads/${empresaId}`),
+        ];
+
+        if (resPipeline.data.length === 0) {
+          Promise.all(baseRequests).then(([resLeads, resMedios, resUsuarios, resEstatus]) => {
+            setLeads(resLeads.data);
+            setMedios(resMedios.data);
+            setEtapas([]);
+            setAgentes(resUsuarios.data);
+            setEstatusList(resEstatus.data);
+            setCargando(false);
+          }).catch(err => {
+            console.error('❌ Error cargando el tablero:', err);
+            setCargando(false);
+          });
+          return;
+        }
+
+        const pipelineId = resPipeline.data[0].id;
+
+        Promise.all([
+          ...baseRequests,
           api.get(`/etapas/${pipelineId}`),
-          api.get(`/usuarios/empresa/${empresaId}`) 
-        ]).then(([resLeads, resMedios, resEtapas, resUsuarios]) => {
+        ]).then(([resLeads, resMedios, resUsuarios, resEstatus, resEtapas]) => {
           setLeads(resLeads.data);
           setMedios(resMedios.data);
-          setEtapas(resEtapas.data);
           setAgentes(resUsuarios.data);
+          setEstatusList(resEstatus.data);
+          setEtapas(resEtapas.data);
           setCargando(false);
         }).catch(err => {
-          console.error("❌ Error cargando el tablero:", err);
+          console.error('❌ Error cargando el tablero:', err);
           setCargando(false);
         });
 
@@ -91,15 +110,23 @@ function LeadsView() {
   const cerrarModal = () => {
     setIsModalOpen(false);
     setLeadEditando(null);
-    setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', usuario_id: '' });
-    setLeadActivoEnEdicion(true);
+    setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', usuario_id: '', estatus_id: '' });
     setMotivoDesactivacion('');
-    setMostrarAvisoDesactivacion(false);
+    setMostrarAvisoCancelacion(false);
+    setEstatusOriginalCodigo('activo');
   };
 
   // NUEVA FUNCIÓN: Abre el modal con los datos del lead a editar
+  const esLeadCancelado = (lead) => lead.estatus_codigo === CODIGO_CANCELADO;
+  const esLeadMovible = (lead) => !esLeadCancelado(lead) && (lead.estatus_permite_mover === 1 || lead.estatus_permite_mover === true);
+  const esLeadEditable = (lead) => !esLeadCancelado(lead);
+  const incluyeEnSuma = (lead) => lead.estatus_incluir_en_suma === 1 || lead.estatus_incluir_en_suma === true;
+
+  const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
+  const vaACancelarEnFormulario = formData.estatus_id && formData.estatus_id === estatusCanceladoId;
+
   const abrirModalEditar = (lead) => {
-    if (!esLeadActivo(lead)) return;
+    if (!esLeadEditable(lead)) return;
     setLeadEditando(lead.id);
     setFormData({
       nombre: lead.nombre || '',
@@ -107,26 +134,55 @@ function LeadsView() {
       telefono: lead.telefono || '',
       valor: lead.valor || '',
       medio: lead.medio || '',
-      usuario_id: lead.usuario_id || ''
+      usuario_id: lead.usuario_id || '',
+      estatus_id: lead.estatus_id || ''
     });
-    setLeadActivoEnEdicion(true);
+    setEstatusOriginalCodigo(lead.estatus_codigo || 'activo');
     setMotivoDesactivacion('');
-    setMostrarAvisoDesactivacion(false);
+    setMostrarAvisoCancelacion(false);
     setIsModalOpen(true);
   };
 
-  const handleToggleActivo = (marcarActivo) => {
-    if (marcarActivo) {
-      setLeadActivoEnEdicion(true);
-      setMotivoDesactivacion('');
-      return;
+  const handleCambioEstatus = (nuevoEstatusId) => {
+    const nuevo = estatusList.find((e) => e.id === nuevoEstatusId);
+    if (nuevo?.codigo === CODIGO_CANCELADO && estatusOriginalCodigo !== CODIGO_CANCELADO) {
+      setMostrarAvisoCancelacion(true);
     }
-    setMostrarAvisoDesactivacion(true);
+    if (nuevo?.codigo !== CODIGO_CANCELADO) {
+      setMotivoDesactivacion('');
+    }
+    setFormData({ ...formData, estatus_id: nuevoEstatusId });
   };
 
-  const confirmarAvisoDesactivacion = () => {
-    setMostrarAvisoDesactivacion(false);
-    setLeadActivoEnEdicion(false);
+  const confirmarAvisoCancelacion = () => {
+    setMostrarAvisoCancelacion(false);
+  };
+
+  const toggleFiltroEstatus = (id) => {
+    setFiltroEstatusIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const etiquetaFiltroEstatus = () => {
+    if (filtroEstatusIds.length === 0) return 'Todos los estatus';
+    if (filtroEstatusIds.length === 1) {
+      return estatusList.find((e) => e.id === filtroEstatusIds[0])?.nombre || '1 estatus';
+    }
+    return `${filtroEstatusIds.length} estatus`;
+  };
+
+  const estiloTarjetaLead = (lead) => {
+    if (esLeadCancelado(lead)) {
+      return { backgroundColor: '#f1f5f9', borderColor: '#cbd5e1' };
+    }
+    if (lead.estatus_color) {
+      return {
+        backgroundColor: `${lead.estatus_color}14`,
+        borderColor: `${lead.estatus_color}55`,
+      };
+    }
+    return {};
   };
 
   const handleSubmit = (e) => {
@@ -144,8 +200,8 @@ function LeadsView() {
     
     // Si estamos EDITANDO
     if (leadEditando) {
-      if (!leadActivoEnEdicion && !motivoDesactivacion.trim()) {
-        alert('Indica el motivo de desactivación antes de guardar.');
+      if (vaACancelarEnFormulario && !motivoDesactivacion.trim()) {
+        alert('Indica el motivo de cancelación antes de guardar.');
         return;
       }
 
@@ -155,11 +211,11 @@ function LeadsView() {
         telefono: formData.telefono,
         valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
-        usuario_id: agenteAsignado
+        usuario_id: agenteAsignado,
+        estatus_id: formData.estatus_id
       };
 
-      if (!leadActivoEnEdicion) {
-        datosActualizados.activo = 0;
+      if (vaACancelarEnFormulario) {
         datosActualizados.motivo_desactivacion = motivoDesactivacion.trim();
       }
 
@@ -203,13 +259,10 @@ const obtenerLeadsPorEtapaId = (stageId) => {
     return leads.filter(lead => {
       const esDeLaEtapa = lead.stage_id === stageId;
       const esDelAgente = filtroAgente === '' || lead.usuario_id === filtroAgente;
-      const activo = esLeadActivo(lead);
-      const cumpleFiltroActivo =
-        filtroActivo === 'ambos' ||
-        (filtroActivo === 'activos' && activo) ||
-        (filtroActivo === 'inactivos' && !activo);
+      const cumpleFiltroEstatus =
+        filtroEstatusIds.length === 0 || filtroEstatusIds.includes(lead.estatus_id);
 
-      return esDeLaEtapa && esDelAgente && cumpleFiltroActivo;
+      return esDeLaEtapa && esDelAgente && cumpleFiltroEstatus;
     });
   };
 
@@ -237,7 +290,7 @@ const handleDragStart = (e, leadId) => {
     const leadId = e.dataTransfer.getData("leadId");
     const lead = leads.find(l => l.id === leadId);
 
-    if (leadId && lead && esLeadActivo(lead)) {
+    if (leadId && lead && esLeadMovible(lead)) {
       api.put(`/leads/${leadId}/etapa`, { stage_id: targetStageId })
         .then(() => fetchTablero())
         .catch(err => {
@@ -341,16 +394,52 @@ const handleDragStart = (e, leadId) => {
 )}
       
 
-          <select
-            value={filtroActivo}
-            onChange={(e) => setFiltroActivo(e.target.value)}
-            className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm min-w-[160px]"
-            aria-label="Filtrar por estado del lead"
-          >
-            <option value="activos">Solo activos</option>
-            <option value="inactivos">Solo inactivos</option>
-            <option value="ambos">Activos e inactivos</option>
-          </select>
+          <div className="relative inline-block text-left min-w-[200px]">
+            <button
+              type="button"
+              onClick={() => setMenuEstatusAbierto(!menuEstatusAbierto)}
+              className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm hover:bg-slate-50"
+            >
+              <span>{etiquetaFiltroEstatus()}</span>
+              <ChevronDown size={16} className={`text-slate-400 transition-transform ${menuEstatusAbierto ? 'rotate-180' : ''}`} />
+            </button>
+            {menuEstatusAbierto && (
+              <div className="absolute z-20 right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-100 py-1 max-h-72 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => { setFiltroEstatusIds([]); setMenuEstatusAbierto(false); }}
+                  className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
+                    filtroEstatusIds.length === 0 ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Todos los estatus
+                  {filtroEstatusIds.length === 0 && <Check size={14} />}
+                </button>
+                {estatusList.map((est) => {
+                  const sel = filtroEstatusIds.includes(est.id);
+                  return (
+                    <button
+                      key={est.id}
+                      type="button"
+                      onClick={() => toggleFiltroEstatus(est.id)}
+                      className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
+                        sel ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: est.color_hex || '#e2e8f0' }}
+                        />
+                        {est.nombre}
+                      </span>
+                      {sel && <Check size={14} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <button 
             onClick={() => { setLeadEditando(null); setIsModalOpen(true); }}
@@ -373,7 +462,10 @@ const handleDragStart = (e, leadId) => {
       <div className="flex gap-6 overflow-x-auto pb-6 w-full max-w-full min-w-0">
         {etapas.map(etapa => {
           const leadsFiltrados = obtenerLeadsPorEtapaId(etapa.id);
-          const sumaTotal = leadsFiltrados.reduce((total, lead) => total + parseFloat(lead.valor || 0), 0);
+          const sumaTotal = leadsFiltrados.reduce((total, lead) => {
+            if (!incluyeEnSuma(lead)) return total;
+            return total + parseFloat(lead.valor || 0);
+          }, 0);
 
           return (
             <div 
@@ -399,53 +491,63 @@ const handleDragStart = (e, leadId) => {
 
               <div className="space-y-3 min-h-[150px]">
                 {leadsFiltrados.map(lead => {
-                  const activo = esLeadActivo(lead);
+                  const movible = esLeadMovible(lead);
+                  const editable = esLeadEditable(lead);
+                  const cancelado = esLeadCancelado(lead);
                   return (
                   <div 
                     key={lead.id} 
-                    draggable={activo}
-                    onDragStart={activo ? (e) => handleDragStart(e, lead.id) : undefined}
-                    onDragEnd={activo ? handleDragEnd : undefined}
+                    draggable={movible}
+                    onDragStart={movible ? (e) => handleDragStart(e, lead.id) : undefined}
+                    onDragEnd={movible ? handleDragEnd : undefined}
+                    style={estiloTarjetaLead(lead)}
                     className={`p-4 rounded-xl shadow-sm border group relative overflow-hidden transition-shadow ${
-                      activo
-                        ? 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing'
-                        : 'bg-slate-100 border-slate-300 opacity-75 grayscale cursor-default'
-                    }`}
+                      movible
+                        ? 'hover:shadow-md cursor-grab active:cursor-grabbing'
+                        : cancelado
+                          ? 'opacity-75 grayscale cursor-default'
+                          : 'opacity-90 cursor-default'
+                    } ${!lead.estatus_color && !cancelado ? 'bg-white border-slate-200 hover:border-blue-400' : ''}`}
                   >
-                    <div className="absolute left-0 top-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: activo ? (etapa.color_hex || '#3b82f6') : '#94a3b8' }}></div>
+                    <div
+                      className="absolute left-0 top-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{ backgroundColor: lead.estatus_color || (cancelado ? '#94a3b8' : (etapa.color_hex || '#3b82f6')) }}
+                    />
                     
-                    {activo && (
+                    {editable && (
                       <button 
                         type="button"
                         onClick={() => abrirModalEditar(lead)}
-                        className="absolute top-3 right-3 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-md p-1"
+                        className="absolute top-9 right-3 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-md p-1 z-20"
                         title="Editar Prospecto"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                       </button>
                     )}
 
-                    {!activo && (
-                      <span className="absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200 px-2 py-0.5 rounded">
-                        Inactivo
-                      </span>
-                    )}
+                    <span className={`absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none ${
+                      cancelado
+                        ? 'text-slate-500 bg-slate-200'
+                        : 'text-slate-600 bg-white/90 border border-slate-200'
+                    } ${editable ? 'group-hover:opacity-0' : ''}`}>
+                      {lead.estatus_nombre || '—'}
+                    </span>
                     
-                    <div className={`flex justify-between items-start mb-1 ${activo ? 'pr-6' : 'pr-16'}`}>
-                      <p className={`font-bold text-sm truncate ${activo ? 'text-slate-900' : 'text-slate-500'}`}>{lead.nombre || "Sin nombre"}</p>
+                    <div className={`flex justify-between items-start mb-1 pr-20`}>
+                      <p className={`font-bold text-sm truncate ${cancelado ? 'text-slate-500' : 'text-slate-900'}`}>{lead.nombre || "Sin nombre"}</p>
                     </div>
 
                     <div className="mb-2">
                       {parseFloat(lead.valor) > 0 && (
                         <span className={`font-bold text-[11px] px-2 py-0.5 rounded-md border whitespace-nowrap inline-block mb-1 ${
-                          activo
+                          incluyeEnSuma(lead)
                             ? 'text-green-700 bg-green-50 border-green-200'
                             : 'text-slate-500 bg-slate-200 border-slate-300'
                         }`}>
                           {formatoMoneda(lead.valor)}
                         </span>
                       )}
-                      <p className={`text-[11px] truncate ${activo ? 'text-slate-500' : 'text-slate-400'}`}>{lead.correo || 'Sin correo'}</p>
+                      <p className={`text-[11px] truncate ${cancelado ? 'text-slate-400' : 'text-slate-500'}`}>{lead.correo || 'Sin correo'}</p>
                     </div>
                     
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
@@ -470,15 +572,15 @@ const handleDragStart = (e, leadId) => {
         })}
       </div>
 
-      {mostrarAvisoDesactivacion && (
+      {mostrarAvisoCancelacion && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
-              Si se guardan los cambios no se podrá activar de nuevo este lead.
+              Si guardas con estatus cancelado, este lead no podrá cambiar de estatus ni editarse de nuevo.
             </p>
             <button
               type="button"
-              onClick={confirmarAvisoDesactivacion}
+              onClick={confirmarAvisoCancelacion}
               className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
             >
               OK
@@ -541,33 +643,31 @@ const handleDragStart = (e, leadId) => {
                 </div>
 
                 {leadEditando && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lead activo</p>
-                        <p className="text-sm text-slate-600 mt-0.5">Desactivar es permanente al guardar</p>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={leadActivoEnEdicion}
-                        onClick={() => handleToggleActivo(!leadActivoEnEdicion)}
-                        className={`relative inline-flex h-7 w-12 shrink-0 rounded-full transition-colors ${
-                          leadActivoEnEdicion ? 'bg-blue-600' : 'bg-slate-400'
-                        }`}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        Estatus del prospecto
+                      </label>
+                      <select
+                        value={formData.estatus_id}
+                        onChange={(e) => handleCambioEstatus(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-medium text-slate-800"
                       >
-                        <span
-                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform mt-1 ${
-                            leadActivoEnEdicion ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
+                        {estatusList.map((est) => (
+                          <option key={est.id} value={est.id}>
+                            {est.nombre}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-slate-500 mt-1.5">
+                        Cancelar es permanente. Los demás estatus se pueden cambiar después.
+                      </p>
                     </div>
 
-                    {!leadActivoEnEdicion && (
-                      <div className="mt-4 animate-in fade-in slide-in-from-top-1">
+                    {vaACancelarEnFormulario && (
+                      <div className="animate-in fade-in slide-in-from-top-1">
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                          ¿Por qué se desactiva este lead? *
+                          Motivo de cancelación *
                         </label>
                         <textarea
                           required

@@ -122,7 +122,7 @@ const CotizadorView = () => {
 
   const cargarLeads = () => {
     api.get(`/leads/${empresaId}`)
-      .then(res => setLeads(res.data.filter(l => l.activo !== 0 && l.activo !== false)))
+      .then(res => setLeads(res.data.filter(l => l.estatus_incluir_en_suma === 1 || l.estatus_incluir_en_suma === true)))
       .catch(console.error);
   };
 

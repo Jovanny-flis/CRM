@@ -17,6 +17,15 @@ const pool = require('./db');
 require('./firebase');
 const admin = require('firebase-admin');
 const { asegurarCatalogoCanales } = require('./lib/canales');
+const {
+    CODIGO_ACTIVO,
+    CODIGO_CANCELADO,
+    ORDEN_CANCELADO,
+    asegurarCatalogoEstatus,
+    obtenerEstatusInicial,
+    listarEstatusEmpresa,
+    esCancelado,
+} = require('./lib/estatus-leads');
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
 app.use(cors());
@@ -431,23 +440,232 @@ app.put('/api/etapas/:id',
     });
 });
 
+// =========================================================================
+// ESTATUS DE PROSPECTOS (por empresa)
+// =========================================================================
+
+app.get('/api/estatus-leads/:empresa_id',
+    verificarToken,
+    revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']),
+    validarEmpresaParam('empresa_id'),
+    async (req, res) => {
+        const { empresa_id } = req.params;
+        try {
+            const lista = await listarEstatusEmpresa(pool, empresa_id);
+            res.status(200).json(lista);
+        } catch (error) {
+            console.error('❌ Error listando estatus:', error.message);
+            res.status(500).json({ error: error.message || 'Error al listar estatus' });
+        }
+    },
+);
+
+app.post('/api/estatus-leads',
+    verificarToken,
+    revisarRol(['super_admin', 'admin_empresa']),
+    async (req, res) => {
+        const {
+            empresa_id,
+            nombre,
+            color_hex,
+            incluir_en_suma,
+            permite_mover,
+        } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!empresa_id) return res.status(400).json({ error: 'empresa_id es requerido.' });
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del estatus es obligatorio.' });
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+            return res.status(403).json({ error: 'No puedes crear estatus en otra empresa.' });
+        }
+
+        const db = pool.promise();
+        try {
+            await asegurarCatalogoEstatus(pool, empresa_id);
+            const codigo = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+            const [rango] = await db.query(
+                `SELECT COALESCE(MAX(orden), 0) AS max_orden FROM lead_estatus
+                 WHERE empresa_id = ? AND codigo NOT IN (?, ?)`,
+                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO],
+            );
+            const orden = Math.min((rango[0]?.max_orden || 0) + 1, ORDEN_CANCELADO - 1);
+            const id = crypto.randomUUID();
+            const color = color_hex === '' || color_hex === 'sin_color' ? null : (color_hex || null);
+
+            await db.query(
+                `INSERT INTO lead_estatus
+                 (id, empresa_id, codigo, nombre, color_hex, incluir_en_suma, permite_mover, es_sistema, orden)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                [
+                    id,
+                    empresa_id,
+                    codigo,
+                    nombreLimpio,
+                    color,
+                    incluir_en_suma ? 1 : 0,
+                    permite_mover ? 1 : 0,
+                    orden,
+                ],
+            );
+
+            res.status(201).json({ mensaje: 'Estatus creado', id });
+        } catch (error) {
+            console.error('❌ Error al crear estatus:', error.message);
+            res.status(500).json({ error: error.message || 'Error al crear estatus' });
+        }
+    },
+);
+
+app.put('/api/estatus-leads/:id',
+    verificarToken,
+    revisarRol(['super_admin', 'admin_empresa']),
+    validarRecursoEmpresa('SELECT empresa_id FROM lead_estatus WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+        const { nombre, color_hex, incluir_en_suma, permite_mover } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del estatus es obligatorio.' });
+
+        const db = pool.promise();
+        try {
+            const [actual] = await db.query('SELECT * FROM lead_estatus WHERE id = ? LIMIT 1', [id]);
+            if (!actual.length) return res.status(404).json({ error: 'Estatus no encontrado.' });
+
+            const fila = actual[0];
+            const color = color_hex === '' || color_hex === 'sin_color' ? null : (color_hex ?? fila.color_hex);
+
+            if (fila.codigo === CODIGO_CANCELADO) {
+                await db.query('UPDATE lead_estatus SET nombre = ? WHERE id = ?', [nombreLimpio, id]);
+                return res.status(200).json({ mensaje: 'Estatus actualizado' });
+            }
+
+            if (fila.codigo === CODIGO_ACTIVO) {
+                await db.query(
+                    'UPDATE lead_estatus SET nombre = ?, color_hex = ? WHERE id = ?',
+                    [nombreLimpio, color, id],
+                );
+                return res.status(200).json({ mensaje: 'Estatus actualizado' });
+            }
+
+            await db.query(
+                `UPDATE lead_estatus
+                 SET nombre = ?, color_hex = ?, incluir_en_suma = ?, permite_mover = ?
+                 WHERE id = ?`,
+                [
+                    nombreLimpio,
+                    color,
+                    incluir_en_suma ? 1 : 0,
+                    permite_mover ? 1 : 0,
+                    id,
+                ],
+            );
+            res.status(200).json({ mensaje: 'Estatus actualizado' });
+        } catch (error) {
+            console.error('❌ Error al actualizar estatus:', error.message);
+            res.status(500).json({ error: error.message || 'Error al actualizar estatus' });
+        }
+    },
+);
+
+app.put('/api/estatus-leads/reordenar',
+    verificarToken,
+    revisarRol(['super_admin', 'admin_empresa']),
+    async (req, res) => {
+        const { empresa_id, ids_ordenados } = req.body;
+
+        if (!empresa_id || !Array.isArray(ids_ordenados)) {
+            return res.status(400).json({ error: 'empresa_id e ids_ordenados son requeridos.' });
+        }
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+            return res.status(403).json({ error: 'No puedes reordenar estatus de otra empresa.' });
+        }
+
+        const db = pool.promise();
+        try {
+            const [sistema] = await db.query(
+                'SELECT id, codigo FROM lead_estatus WHERE empresa_id = ? AND es_sistema = 1',
+                [empresa_id],
+            );
+            const idsSistema = new Set(sistema.map((s) => s.id));
+            let orden = 1;
+
+            for (const estatusId of ids_ordenados) {
+                if (idsSistema.has(estatusId)) continue;
+                await db.query(
+                    'UPDATE lead_estatus SET orden = ? WHERE id = ? AND empresa_id = ? AND es_sistema = 0',
+                    [orden, estatusId, empresa_id],
+                );
+                orden += 1;
+            }
+
+            res.status(200).json({ mensaje: 'Orden actualizado' });
+        } catch (error) {
+            console.error('❌ Error al reordenar estatus:', error.message);
+            res.status(500).json({ error: error.message || 'Error al reordenar' });
+        }
+    },
+);
+
+app.delete('/api/estatus-leads/:id',
+    verificarToken,
+    revisarRol(['super_admin', 'admin_empresa']),
+    validarRecursoEmpresa('SELECT empresa_id FROM lead_estatus WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+        const db = pool.promise();
+
+        try {
+            const [actual] = await db.query('SELECT * FROM lead_estatus WHERE id = ? LIMIT 1', [id]);
+            if (!actual.length) return res.status(404).json({ error: 'Estatus no encontrado.' });
+            if (actual[0].es_sistema) {
+                return res.status(400).json({ error: 'No se pueden eliminar los estatus del sistema.' });
+            }
+
+            const activo = await obtenerEstatusInicial(pool, actual[0].empresa_id);
+            await db.query('UPDATE leads SET estatus_id = ? WHERE estatus_id = ?', [activo.id, id]);
+            await db.query('DELETE FROM lead_estatus WHERE id = ?', [id]);
+
+            res.status(200).json({ mensaje: 'Estatus eliminado. Los leads afectados pasaron a Activo.' });
+        } catch (error) {
+            console.error('❌ Error al eliminar estatus:', error.message);
+            res.status(500).json({ error: error.message || 'Error al eliminar estatus' });
+        }
+    },
+);
+
+const SQL_LEADS_CON_ESTATUS = `
+    SELECT l.*, ps.nombre_etapa,
+           e.codigo AS estatus_codigo,
+           e.nombre AS estatus_nombre,
+           e.color_hex AS estatus_color,
+           e.incluir_en_suma AS estatus_incluir_en_suma,
+           e.permite_mover AS estatus_permite_mover,
+           e.es_sistema AS estatus_es_sistema
+    FROM leads l
+    LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
+    LEFT JOIN lead_estatus e ON l.estatus_id = e.id
+`;
+
 // Obtener Leads por empresa
-app.get('/api/leads/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
+app.get('/api/leads/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), async (req, res) => {
     const { empresa_id } = req.params;
-    const query = `
-        SELECT l.*, ps.nombre_etapa 
-        FROM leads l
-        LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
-        WHERE l.empresa_id = ?
-    `;
-    pool.query(query, [empresa_id], (error, resultados) => {
+
+    try {
+        await asegurarCatalogoEstatus(pool, empresa_id);
+    } catch (errSeed) {
+        console.error('🚨 Error al sembrar estatus:', errSeed.message);
+        return res.status(500).json({ error: 'No se pudo inicializar el catálogo de estatus.' });
+    }
+
+    pool.query(`${SQL_LEADS_CON_ESTATUS} WHERE l.empresa_id = ?`, [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
         res.status(200).json(resultados);
     });
 });
 
 // Crear un nuevo prospecto (Lead)
-app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), (req, res) => {
+app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), async (req, res) => {
     const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id } = req.body;
 
     if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
@@ -458,89 +676,104 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
         return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
     }
 
-    const query = `
-        INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, activo, stage_id, usuario_id) 
-        VALUES (UUID(), ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `;
-    
-    pool.query(query, [
-        empresa_id, 
-        nombre, 
-        correo, 
-        telefono, 
-        valor,
-        medio, 
-        stage_id || null, 
-        usuario_id || null
-    ], (error) => {
-        if (error) {
-            console.error("❌ ERROR EN MYSQL AL GUARDAR:", error.sqlMessage || error);
-            return res.status(500).json({ error: error.sqlMessage || "Error al guardar en BD" });
+    try {
+        const estatusInicial = await obtenerEstatusInicial(pool, empresa_id);
+        if (!estatusInicial) {
+            return res.status(500).json({ error: 'No se encontró el estatus inicial de la empresa.' });
         }
-        res.status(201).json({ mensaje: "Lead creado exitosamente" });
-    });
+
+        const query = `
+            INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, estatus_id, stage_id, usuario_id)
+            VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        pool.query(query, [
+            empresa_id,
+            nombre,
+            correo,
+            telefono,
+            valor,
+            medio,
+            estatusInicial.id,
+            stage_id || null,
+            usuario_id || null,
+        ], (error) => {
+            if (error) {
+                console.error('❌ ERROR EN MYSQL AL GUARDAR:', error.sqlMessage || error);
+                return res.status(500).json({ error: error.sqlMessage || 'Error al guardar en BD' });
+            }
+            res.status(201).json({ mensaje: 'Lead creado exitosamente' });
+        });
+    } catch (err) {
+        console.error('❌ Error al crear lead:', err.message);
+        res.status(500).json({ error: err.message || 'Error al crear lead' });
+    }
 });
 
-// NUEVO: Editar la información de un Lead (Prospecto)
+// Editar la información de un Lead (Prospecto)
 app.put('/api/leads/:id',
     verificarToken,
     revisarRol(['super_admin','supervisor','admin_empresa','agente']),
     validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
-    (req, res) => {
+    async (req, res) => {
     const { id } = req.params;
-    const { nombre, correo, telefono, valor, medio, usuario_id, activo, motivo_desactivacion } = req.body;
+    const { nombre, correo, telefono, valor, medio, usuario_id, estatus_id, motivo_desactivacion } = req.body;
+    const db = pool.promise();
 
-    pool.query('SELECT activo FROM leads WHERE id = ?', [id], (errSel, filas) => {
-        if (errSel) return res.status(500).json({ error: errSel.message });
-        if (!filas.length) return res.status(404).json({ error: 'Lead no encontrado' });
+    try {
+        const [filasLead] = await db.query(
+            `${SQL_LEADS_CON_ESTATUS} WHERE l.id = ? LIMIT 1`,
+            [id],
+        );
+        if (!filasLead.length) return res.status(404).json({ error: 'Lead no encontrado' });
 
-        const leadActual = filas[0];
-        if (leadActual.activo === 0) {
-            return res.status(400).json({ error: 'No se puede editar un lead inactivo.' });
+        const leadActual = filasLead[0];
+        if (esCancelado(leadActual)) {
+            return res.status(400).json({ error: 'No se puede editar un lead cancelado.' });
         }
 
         if (!valorEstimadoValido(valor)) {
             return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
         }
 
-        const desactivar = activo === 0 || activo === false;
-        if (desactivar) {
-            const motivo = (motivo_desactivacion || '').trim();
-            if (!motivo) {
-                return res.status(400).json({ error: 'El motivo de desactivación es obligatorio.' });
-            }
-            const queryDesactivar = `
-                UPDATE leads
-                SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?,
-                    activo = 0, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            `;
-            return pool.query(
-                queryDesactivar,
-                [nombre, correo, telefono, valor, medio, usuario_id, motivo, id],
-                (error) => {
-                    if (error) {
-                        console.error("❌ ERROR AL DESACTIVAR LEAD:", error.sqlMessage || error);
-                        return res.status(500).json({ error: error.sqlMessage || "Error al actualizar en BD" });
-                    }
-                    res.status(200).json({ mensaje: "Lead desactivado con éxito" });
-                }
-            );
+        const estatusObjetivoId = estatus_id || leadActual.estatus_id;
+        const [filasEstatus] = await db.query(
+            'SELECT * FROM lead_estatus WHERE id = ? AND empresa_id = ? LIMIT 1',
+            [estatusObjetivoId, leadActual.empresa_id],
+        );
+        if (!filasEstatus.length) {
+            return res.status(400).json({ error: 'Estatus no válido para esta empresa.' });
         }
 
-        const query = `
-            UPDATE leads
-            SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?
-            WHERE id = ?
-        `;
-        pool.query(query, [nombre, correo, telefono, valor, medio, usuario_id, id], (error) => {
-            if (error) {
-                console.error("❌ ERROR AL ACTUALIZAR LEAD:", error.sqlMessage || error);
-                return res.status(500).json({ error: error.sqlMessage || "Error al actualizar en BD" });
+        const estatusObjetivo = filasEstatus[0];
+        const pasaACancelado = estatusObjetivo.codigo === CODIGO_CANCELADO;
+
+        if (pasaACancelado) {
+            const motivo = (motivo_desactivacion || '').trim();
+            if (!motivo) {
+                return res.status(400).json({ error: 'El motivo de cancelación es obligatorio.' });
             }
-            res.status(200).json({ mensaje: "Lead actualizado con éxito" });
-        });
-    });
+            await db.query(
+                `UPDATE leads
+                 SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?,
+                     estatus_id = ?, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [nombre, correo, telefono, valor, medio, usuario_id, estatusObjetivo.id, motivo, id],
+            );
+            return res.status(200).json({ mensaje: 'Lead cancelado con éxito' });
+        }
+
+        await db.query(
+            `UPDATE leads
+             SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?, estatus_id = ?
+             WHERE id = ?`,
+            [nombre, correo, telefono, valor, medio, usuario_id, estatusObjetivo.id, id],
+        );
+        res.status(200).json({ mensaje: 'Lead actualizado con éxito' });
+    } catch (error) {
+        console.error('❌ ERROR AL ACTUALIZAR LEAD:', error.message);
+        res.status(500).json({ error: error.message || 'Error al actualizar en BD' });
+    }
 });
 
 
@@ -702,11 +935,19 @@ app.put('/api/leads/:id/etapa',
     const { id } = req.params;
     const { stage_id } = req.body;
 
-    pool.query('SELECT activo FROM leads WHERE id = ?', [id], (errSel, filas) => {
+    pool.query(
+        `${SQL_LEADS_CON_ESTATUS} WHERE l.id = ? LIMIT 1`,
+        [id],
+        (errSel, filas) => {
         if (errSel) return res.status(500).json({ error: errSel.message });
         if (!filas.length) return res.status(404).json({ error: 'Lead no encontrado' });
-        if (filas[0].activo === 0) {
-            return res.status(400).json({ error: 'No se puede mover un lead inactivo.' });
+
+        const lead = filas[0];
+        if (esCancelado(lead)) {
+            return res.status(400).json({ error: 'No se puede mover un lead cancelado.' });
+        }
+        if (!lead.estatus_permite_mover) {
+            return res.status(400).json({ error: 'Este estatus no permite mover el lead en el embudo.' });
         }
 
         const query = 'UPDATE leads SET stage_id = ? WHERE id = ?';
@@ -860,10 +1101,22 @@ app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
 // =========================================================================
 // RUTAS DEL DASHBOARD (ESTADÍSTICAS)
 // =========================================================================
-app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']), validarEmpresaParam('empresa_id'), (req, res) => {
+app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin', 'admin_empresa', 'supervisor', 'agente']), validarEmpresaParam('empresa_id'), async (req, res) => {
     const { empresa_id } = req.params;
 
-    let leadsQuery = 'SELECT COUNT(*) as totalLeads, SUM(valor) as totalValor FROM leads WHERE empresa_id = ? AND activo = 1';
+    try {
+        await asegurarCatalogoEstatus(pool, empresa_id);
+    } catch (errSeed) {
+        console.error('🚨 Error al sembrar estatus (dashboard):', errSeed.message);
+        return res.status(500).json({ error: 'No se pudo inicializar estatus para estadísticas.' });
+    }
+
+    let leadsQuery = `
+        SELECT COUNT(*) as totalLeads, SUM(l.valor) as totalValor
+        FROM leads l
+        INNER JOIN lead_estatus e ON l.estatus_id = e.id
+        WHERE l.empresa_id = ? AND e.incluir_en_suma = 1
+    `;
     let cotizacionesQuery = 'SELECT COUNT(*) as totalCotizaciones FROM cotizaciones WHERE empresa_id = ?';
 
     const params = [empresa_id];
