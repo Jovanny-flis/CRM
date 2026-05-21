@@ -15,7 +15,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Empresas           | CRUD de empresas (alcance `super_admin` en API). |
 | Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa. |
 | Pipelines y etapas | Embudos y etapas por empresa. |
-| Leads              | Prospectos, medios (`lead_sources`) y cambio de etapa. |
+| Leads              | Prospectos, canales de origen (`lead_sources`, UI «Canales»; columna `leads.medio`) y cambio de etapa. |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). |
 | Cotizador          | Cálculo de arrendamiento, guardado de cotizaciones e historial. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
 
@@ -294,10 +294,13 @@ CREATE TABLE `lead_sources` (
   `id` varchar(36) NOT NULL,
   `empresa_id` int(11) DEFAULT NULL,
   `nombre` varchar(100) NOT NULL,
+  `parent_id` varchar(36) DEFAULT NULL COMMENT 'Canal padre; NULL = canal raíz',
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `empresa_id` (`empresa_id`),
-  CONSTRAINT `fk_lead_sources_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`)
+  KEY `idx_lead_sources_parent` (`parent_id`),
+  CONSTRAINT `fk_lead_sources_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`),
+  CONSTRAINT `fk_lead_sources_parent` FOREIGN KEY (`parent_id`) REFERENCES `lead_sources` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `leads` (
@@ -383,7 +386,9 @@ Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api
 | POST | `/etapas` | mismos | El pipeline objetivo debe pertenecer a la empresa del usuario |
 | PUT | `/etapas/:id` | mismos | `validarRecursoEmpresa` (vía JOIN con `pipelines`) |
 
-### Leads y medios
+### Leads y canales (API `medios`)
+
+En la interfaz la sección se llama **Canales**; en base de datos y API se mantiene la nomenclatura histórica (`lead_sources`, columna `leads.medio`, rutas `/api/medios`).
 
 | Método | Endpoint | Roles | Aislamiento por empresa |
 | ------ | -------- | ----- | ----------------------- |
@@ -391,7 +396,34 @@ Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api
 | POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario |
 | PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead) |
 | PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa` (empresa del lead) |
-| GET | `/medios/:empresa_id` | mismos | `validarEmpresaParam` |
+| GET | `/medios/:empresa_id` | mismos | `validarEmpresaParam`; inserta raíces faltantes |
+| POST | `/medios` | mismos | `empresa_id` del body; cualquier usuario autenticado puede CRUD |
+| PUT | `/medios/:id` | mismos | `validarRecursoEmpresa` (empresa del canal) |
+| DELETE | `/medios/:id` | mismos | `validarRecursoEmpresa`; no modifica `leads.medio` histórico |
+
+**Catálogo de canales (`lead_sources`):**
+
+- En UI la sección se llama **Canales**; en BD/API se mantiene `lead_sources`, columna `leads.medio` y rutas `/api/medios`.
+- Jerarquía opcional con `parent_id` (subcanales). Al eliminar un canal padre, sus subcanales se eliminan en cascada (`ON DELETE CASCADE`).
+- El valor persistido en el lead es el **nombre** del canal o subcanal elegido (`leads.medio`), no el UUID del catálogo. Eliminar un canal del catálogo no altera el texto ya guardado en leads.
+- **Default:** `Contacto directo` (`MEDIO_DEFAULT` en `lib/canales.js` y `SelectorCanales.jsx`). Al crear/editar un lead sin selección explícita se persiste ese valor.
+- **Catálogo raíz estándar** (9 canales, iguales para todas las empresas): Referidos de clientes, Marketing digital, Socios, Agentes, Eventos empresariales, Concesionarios, Webinars, Contacto directo, Cotizador. Definido en `lib/canales.js`.
+- **Subcanales:** no se siembran en migración ni en semilla automática del backend. Cada empresa los crea desde el front:
+  - Botón **Nuevo** (pie del combobox): canal raíz.
+  - Menú ⋮ de un canal raíz → **Nuevo subcanal**: alta bajo ese padre.
+  - Menú ⋮ → Editar / Eliminar en cualquier canal o subcanal.
+- **Semilla en runtime:** cada `GET /medios/:empresa_id` inserta solo **raíces faltantes** (`asegurarCanalesRaiz`); no repara ni inserta subcanales.
+- **UI:** `frontend/src/components/SelectorCanales.jsx` — combobox con listas anidadas (flecha `>` por canal con hijos), portal flotante para scroll fuera del modal, CRUD inline.
+
+**Migraciones SQL** (ejecutar en orden sobre una BD existente; ver también `db/schema-v2.sql` como referencia acumulada):
+
+| Archivo | Contenido |
+| ------- | --------- |
+| `db/migrations/v001_lead_activo.sql` | Columnas `activo`, `motivo_desactivacion`, `desactivado_at` en `leads`. |
+| `db/migrations/v002_lead_sources_parent.sql` | Columna `parent_id` en `lead_sources` (DDL; sin datos). |
+| `db/migrations/v003_canales_raiz.sql` | **DML genérico producción:** elimina subcanales y raíces no estándar del catálogo, inserta raíces faltantes por empresa, `UPDATE leads SET medio = 'Contacto directo'`. |
+
+Tras v003, los usuarios ajustan canal por lead y subcanales del catálogo desde el front según necesiten.
 
 ### Cotizador (API pública por decisión de producto)
 
@@ -449,7 +481,7 @@ Endpoints que reciben `empresa_id` en el body (`POST /api/leads`, `POST /api/pip
 ## 12. Próximos pasos sugeridos
 
 - Valorar custom claims de Firebase si conviene reducir la consulta de perfil que hace `verificarToken` (hoy 1 query/request).
-- Introducir herramienta o convención de migraciones SQL encima de `db/schema.sql`.
+- Introducir pipeline de CI/CD; las migraciones parciales viven en `db/migrations/` (v001–v003) con referencia en `db/schema-v2.sql`.
 - Modularizar el backend (rutas, controladores, servicios).
 - Dejar ESLint sin errores y mantener reglas en CI.
 - Añadir pruebas automatizadas y un pipeline mínimo de integración continua.

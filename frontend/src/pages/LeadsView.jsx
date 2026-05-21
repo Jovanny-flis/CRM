@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
 import { Users, User, Check, ChevronDown } from 'lucide-react';
+import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 
 const esLeadActivo = (lead) => lead.activo !== 0 && lead.activo !== false;
 
@@ -141,7 +142,7 @@ function LeadsView() {
         correo: formData.correo,
         telefono: formData.telefono,
         valor: formData.valor ? parseFloat(formData.valor) : 0,
-        medio: formData.medio || 'Directo',
+        medio: formData.medio || MEDIO_DEFAULT,
         usuario_id: agenteAsignado
       };
 
@@ -169,7 +170,7 @@ function LeadsView() {
         correo: formData.correo,
         telefono: formData.telefono,
         valor: formData.valor ? parseFloat(formData.valor) : 0,
-        medio: formData.medio || 'Directo',
+        medio: formData.medio || MEDIO_DEFAULT,
         stage_id: primeraEtapaId,
         usuario_id: agenteAsignado
       };
@@ -438,7 +439,7 @@ const handleDragStart = (e, leadId) => {
                           {agentes.find(a => a.id === lead.usuario_id)?.nombre?.charAt(0) || '?'}
                         </div>
                         <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-medium">
-                          {lead.medio || 'Directo'}
+                          {lead.medio || MEDIO_DEFAULT}
                         </span>
                       </div>
                       <span className="text-[9px] text-slate-300 font-mono">
@@ -514,27 +515,13 @@ const handleDragStart = (e, leadId) => {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Medio</label>
-                    <select 
-                      value={formData.medio} 
-                      onChange={(e) => setFormData({...formData, medio: e.target.value})} 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none appearance-none focus:border-blue-500"
-                    >
-                      <option value="">Selecciona o deja en blanco</option>
-                      {medios.length === 0 ? (
-                        <>
-                          <option value="Facebook">Facebook</option>
-                          <option value="WhatsApp">WhatsApp</option>
-                          <option value="Instagram">Instagram</option>
-                          <option value="Página Web">Página Web</option>
-                          <option value="Recomendación">Recomendación</option>
-                        </>
-                      ) : (
-                        medios.map(m => (
-                          <option key={m.id} value={m.nombre}>{m.nombre}</option>
-                        ))
-                      )}
-                    </select>
+                    <SelectorCanales
+                      empresaId={empresaId}
+                      value={formData.medio}
+                      onChange={(medio) => setFormData({ ...formData, medio })}
+                      medios={medios}
+                      onMediosActualizados={setMedios}
+                    />
                   </div>
                 </div>
 

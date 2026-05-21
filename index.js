@@ -16,6 +16,7 @@ const {
 const pool = require('./db');
 require('./firebase');
 const admin = require('firebase-admin');
+const { asegurarCatalogoCanales } = require('./lib/canales');
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
 app.use(cors());
@@ -530,16 +531,155 @@ app.put('/api/leads/:id',
 });
 
 
-app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
+app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), async (req, res) => {
     const { empresa_id } = req.params;
-    pool.query('SELECT * FROM lead_sources WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
-        if (error) {
-            console.error("🚨 ¡ERROR EN MEDIOS! ->", error.message); // Nuestra trampa
-            return res.status(500).json({ error: error.message });
-        }
-        res.status(200).json(resultados);
-    });
+
+    try {
+        await asegurarCatalogoCanales(pool, empresa_id);
+    } catch (errSeed) {
+        console.error('🚨 Error al sembrar canales:', errSeed.message);
+        return res.status(500).json({ error: 'No se pudo inicializar el catálogo de canales.' });
+    }
+
+    pool.query(
+        `SELECT * FROM lead_sources
+         WHERE empresa_id = ?
+         ORDER BY COALESCE(parent_id, id), parent_id IS NOT NULL, nombre ASC`,
+        [empresa_id],
+        (error, resultados) => {
+            if (error) {
+                console.error('🚨 ¡ERROR EN MEDIOS! ->', error.message);
+                return res.status(500).json({ error: error.message });
+            }
+            res.status(200).json(resultados);
+        },
+    );
 });
+
+app.post('/api/medios', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), async (req, res) => {
+    const { empresa_id, nombre, parent_id } = req.body;
+    const nombreLimpio = (nombre || '').trim();
+
+    if (!empresa_id) return res.status(400).json({ error: 'empresa_id es requerido.' });
+    if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del canal es obligatorio.' });
+    if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+        return res.status(403).json({ error: 'No puedes crear canales en otra empresa.' });
+    }
+
+    const db = pool.promise();
+
+    try {
+        if (parent_id) {
+            const [padre] = await db.query(
+                'SELECT id FROM lead_sources WHERE id = ? AND empresa_id = ? LIMIT 1',
+                [parent_id, empresa_id],
+            );
+            if (!padre.length) {
+                return res.status(400).json({ error: 'El canal padre no existe en esta empresa.' });
+            }
+        }
+
+        const [duplicado] = await db.query(
+            `SELECT id FROM lead_sources
+             WHERE empresa_id = ? AND nombre = ?
+             AND ((parent_id IS NULL AND ? IS NULL) OR parent_id = ?)
+             LIMIT 1`,
+            [empresa_id, nombreLimpio, parent_id || null, parent_id || null],
+        );
+        if (duplicado.length) {
+            return res.status(409).json({ error: 'Ya existe un canal con ese nombre en el mismo nivel.' });
+        }
+
+        const id = crypto.randomUUID();
+        await db.query(
+            'INSERT INTO lead_sources (id, empresa_id, nombre, parent_id) VALUES (?, ?, ?, ?)',
+            [id, empresa_id, nombreLimpio, parent_id || null],
+        );
+
+        res.status(201).json({ mensaje: 'Canal creado', id, nombre: nombreLimpio, parent_id: parent_id || null });
+    } catch (error) {
+        console.error('❌ ERROR AL CREAR CANAL:', error.message);
+        res.status(500).json({ error: error.message || 'Error al crear canal' });
+    }
+});
+
+app.put('/api/medios/:id',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa('SELECT empresa_id FROM lead_sources WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+        const { nombre, parent_id } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del canal es obligatorio.' });
+
+        const db = pool.promise();
+
+        try {
+            const [actual] = await db.query(
+                'SELECT id, empresa_id, parent_id FROM lead_sources WHERE id = ? LIMIT 1',
+                [id],
+            );
+            if (!actual.length) return res.status(404).json({ error: 'Canal no encontrado.' });
+
+            const empresaId = actual[0].empresa_id;
+            const parentObjetivo = parent_id || null;
+
+            if (parentObjetivo === id) {
+                return res.status(400).json({ error: 'Un canal no puede ser padre de sí mismo.' });
+            }
+
+            if (parentObjetivo) {
+                const [padre] = await db.query(
+                    'SELECT id FROM lead_sources WHERE id = ? AND empresa_id = ? LIMIT 1',
+                    [parentObjetivo, empresaId],
+                );
+                if (!padre.length) {
+                    return res.status(400).json({ error: 'El canal padre no existe en esta empresa.' });
+                }
+            }
+
+            const [duplicado] = await db.query(
+                `SELECT id FROM lead_sources
+                 WHERE empresa_id = ? AND nombre = ? AND id <> ?
+                 AND ((parent_id IS NULL AND ? IS NULL) OR parent_id = ?)
+                 LIMIT 1`,
+                [empresaId, nombreLimpio, id, parentObjetivo, parentObjetivo],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un canal con ese nombre en el mismo nivel.' });
+            }
+
+            await db.query(
+                'UPDATE lead_sources SET nombre = ?, parent_id = ? WHERE id = ?',
+                [nombreLimpio, parentObjetivo, id],
+            );
+
+            res.status(200).json({ mensaje: 'Canal actualizado', id, nombre: nombreLimpio, parent_id: parentObjetivo });
+        } catch (error) {
+            console.error('❌ ERROR AL ACTUALIZAR CANAL:', error.message);
+            res.status(500).json({ error: error.message || 'Error al actualizar canal' });
+        }
+    },
+);
+
+app.delete('/api/medios/:id',
+    verificarToken,
+    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    validarRecursoEmpresa('SELECT empresa_id FROM lead_sources WHERE id = ?'),
+    (req, res) => {
+        const { id } = req.params;
+
+        pool.query('DELETE FROM lead_sources WHERE id = ?', [id], (error) => {
+            if (error) {
+                console.error('❌ ERROR AL ELIMINAR CANAL:', error.message);
+                return res.status(500).json({ error: error.message || 'Error al eliminar canal' });
+            }
+            res.status(200).json({ mensaje: 'Canal eliminado del catálogo. Los leads existentes conservan su texto histórico.' });
+        });
+    },
+);
 // 1. RUTA PARA MOVER DE ETAPA (Drag & Drop)
 app.put('/api/leads/:id/etapa',
     verificarToken,
