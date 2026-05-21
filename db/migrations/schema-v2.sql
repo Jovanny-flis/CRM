@@ -13,6 +13,7 @@
 --   • Catálogo raíz de canales por empresa + normalización única de leads.medio
 --   • lead_estatus + leads.estatus_id (estatus de prospectos)
 --   • Semilla activo/cancelado y asignación estatus_id en leads existentes
+--   • lead_etapas_historial (timestamps por etapa alcanzada hacia adelante)
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
 --   • lib/canales.js — catálogo raíz al crear empresa (POST /empresas); no re-sembrar en GET /medios
@@ -238,6 +239,22 @@ INNER JOIN `lead_estatus` ea ON ea.`empresa_id` = l.`empresa_id` AND ea.`codigo`
 INNER JOIN `lead_estatus` ec ON ec.`empresa_id` = l.`empresa_id` AND ec.`codigo` = 'cancelado'
 SET l.`estatus_id` = CASE WHEN l.`activo` = 0 THEN ec.`id` ELSE ea.`id` END
 WHERE l.`estatus_id` IS NULL;
+
+-- -----------------------------------------------------------------------------
+-- 7) lead_etapas_historial — trazabilidad temporal por etapa del embudo
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `lead_etapas_historial` (
+  `id` varchar(36) NOT NULL,
+  `lead_id` varchar(36) NOT NULL,
+  `stage_id` varchar(36) NOT NULL,
+  `alcanzado_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_lead_etapas_historial_lead_stage` (`lead_id`, `stage_id`),
+  KEY `idx_lead_etapas_historial_lead` (`lead_id`),
+  KEY `idx_lead_etapas_historial_stage` (`stage_id`),
+  CONSTRAINT `fk_leh_lead` FOREIGN KEY (`lead_id`) REFERENCES `leads` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_leh_stage` FOREIGN KEY (`stage_id`) REFERENCES `pipeline_stages` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Marcar migración unificada aplicada
 INSERT IGNORE INTO `_crm_migraciones` (`clave`) VALUES ('schema_v2_unificado');

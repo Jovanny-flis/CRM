@@ -47,6 +47,7 @@ function LeadsView() {
   const [motivoDesactivacion, setMotivoDesactivacion] = useState('');
   const [mostrarAvisoCancelacion, setMostrarAvisoCancelacion] = useState(false);
   const [estatusOriginalCodigo, setEstatusOriginalCodigo] = useState('activo');
+  const [confirmacionMovimiento, setConfirmacionMovimiento] = useState(null);
 
   const fetchTablero = () => {
     if (!empresaId) {
@@ -285,19 +286,63 @@ const handleDragStart = (e, leadId) => {
     e.preventDefault(); // Indispensable para permitir el "drop"
   };
 
+  const parseEtapasAlcanzadas = (lead) => {
+    if (!lead.etapas_alcanzadas) return new Set();
+    return new Set(String(lead.etapas_alcanzadas).split(','));
+  };
+
+  const hayEtapasNuevasPorRegistrar = (lead, ordenOrigen, ordenDestino) => {
+    const alcanzadas = parseEtapasAlcanzadas(lead);
+    return etapas.some(
+      (et) => et.orden > ordenOrigen && et.orden <= ordenDestino && !alcanzadas.has(et.id),
+    );
+  };
+
   const handleDrop = (e, targetStageId) => {
     e.preventDefault();
     const leadId = e.dataTransfer.getData("leadId");
     const lead = leads.find(l => l.id === leadId);
 
-    if (leadId && lead && esLeadMovible(lead)) {
-      api.put(`/leads/${leadId}/etapa`, { stage_id: targetStageId })
-        .then(() => fetchTablero())
-        .catch(err => {
-          const msg = err.response?.data?.error || err.message;
-          console.error("❌ Error al mover:", msg);
-        });
+    if (!leadId || !lead || !esLeadMovible(lead)) return;
+    if (lead.stage_id === targetStageId) return;
+
+    const etapaOrigen = etapas.find((et) => et.id === lead.stage_id);
+    const etapaDestino = etapas.find((et) => et.id === targetStageId);
+    const ordenOrigen = etapaOrigen?.orden ?? -1;
+    const ordenDestino = etapaDestino?.orden ?? 0;
+
+    if (ordenDestino <= ordenOrigen || !hayEtapasNuevasPorRegistrar(lead, ordenOrigen, ordenDestino)) {
+      ejecutarMovimientoEtapa(leadId, targetStageId);
+      return;
     }
+
+    setConfirmacionMovimiento({
+      leadId,
+      idCorto: leadId.slice(0, 8),
+      etapaOrigen: etapaOrigen?.nombre_etapa || '—',
+      etapaDestino: etapaDestino?.nombre_etapa || '—',
+      targetStageId,
+    });
+  };
+
+  const ejecutarMovimientoEtapa = (leadId, targetStageId) => {
+    api.put(`/leads/${leadId}/etapa`, { stage_id: targetStageId })
+      .then(() => fetchTablero())
+      .catch(err => {
+        const msg = err.response?.data?.error || err.message;
+        console.error("❌ Error al mover:", msg);
+        alert('Error al mover el lead: ' + msg);
+      });
+  };
+
+  const confirmarMovimientoEtapa = () => {
+    if (!confirmacionMovimiento) return;
+    ejecutarMovimientoEtapa(confirmacionMovimiento.leadId, confirmacionMovimiento.targetStageId);
+    setConfirmacionMovimiento(null);
+  };
+
+  const cancelarMovimientoEtapa = () => {
+    setConfirmacionMovimiento(null);
   };
 
   if (cargando) return <div className="p-10 text-center text-slate-500 font-medium">Cargando tablero...</div>;
@@ -571,6 +616,35 @@ const handleDragStart = (e, leadId) => {
           );
         })}
       </div>
+
+      {confirmacionMovimiento && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+            <p className="text-slate-800 font-semibold text-lg leading-relaxed">
+              El lead #{confirmacionMovimiento.idCorto} se moverá de{' '}
+              <span className="text-blue-700">{confirmacionMovimiento.etapaOrigen}</span> a{' '}
+              <span className="text-blue-700">{confirmacionMovimiento.etapaDestino}</span>{' '}
+              y generará una etiqueta temporal en la base de datos. ¿Desea continuar?
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={cancelarMovimientoEtapa}
+                className="flex-1 px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarMovimientoEtapa}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {mostrarAvisoCancelacion && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">

@@ -26,6 +26,7 @@ const {
     listarEstatusEmpresa,
     esCancelado,
 } = require('./lib/estatus-leads');
+const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
 app.use(cors());
@@ -648,7 +649,10 @@ const SQL_LEADS_CON_ESTATUS = `
            e.color_hex AS estatus_color,
            e.incluir_en_suma AS estatus_incluir_en_suma,
            e.permite_mover AS estatus_permite_mover,
-           e.es_sistema AS estatus_es_sistema
+           e.es_sistema AS estatus_es_sistema,
+           (SELECT GROUP_CONCAT(h.stage_id)
+            FROM lead_etapas_historial h
+            WHERE h.lead_id = l.id) AS etapas_alcanzadas
     FROM leads l
     LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
     LEFT JOIN lead_estatus e ON l.estatus_id = e.id
@@ -689,28 +693,31 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
             return res.status(500).json({ error: 'No se encontró el estatus inicial de la empresa.' });
         }
 
-        const query = `
-            INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, estatus_id, stage_id, usuario_id)
-            VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
+        const leadId = crypto.randomUUID();
+        const db = pool.promise();
 
-        pool.query(query, [
-            empresa_id,
-            nombre,
-            correo,
-            telefono,
-            valor,
-            medio,
-            estatusInicial.id,
-            stage_id || null,
-            usuario_id || null,
-        ], (error) => {
-            if (error) {
-                console.error('❌ ERROR EN MYSQL AL GUARDAR:', error.sqlMessage || error);
-                return res.status(500).json({ error: error.sqlMessage || 'Error al guardar en BD' });
-            }
-            res.status(201).json({ mensaje: 'Lead creado exitosamente' });
-        });
+        await db.query(
+            `INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, estatus_id, stage_id, usuario_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                leadId,
+                empresa_id,
+                nombre,
+                correo,
+                telefono,
+                valor,
+                medio,
+                estatusInicial.id,
+                stage_id || null,
+                usuario_id || null,
+            ],
+        );
+
+        if (stage_id) {
+            await registrarEtapaInicial(pool, leadId, stage_id);
+        }
+
+        res.status(201).json({ mensaje: 'Lead creado exitosamente', id: leadId });
     } catch (err) {
         console.error('❌ Error al crear lead:', err.message);
         res.status(500).json({ error: err.message || 'Error al crear lead' });
@@ -930,15 +937,16 @@ app.put('/api/leads/:id/etapa',
     verificarToken,
     revisarRol(['super_admin','supervisor','admin_empresa','agente']),
     validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
-    (req, res) => {
+    async (req, res) => {
     const { id } = req.params;
     const { stage_id } = req.body;
+    const db = pool.promise();
 
-    pool.query(
-        `${SQL_LEADS_CON_ESTATUS} WHERE l.id = ? LIMIT 1`,
-        [id],
-        (errSel, filas) => {
-        if (errSel) return res.status(500).json({ error: errSel.message });
+    try {
+        const [filas] = await db.query(
+            `${SQL_LEADS_CON_ESTATUS} WHERE l.id = ? LIMIT 1`,
+            [id],
+        );
         if (!filas.length) return res.status(404).json({ error: 'Lead no encontrado' });
 
         const lead = filas[0];
@@ -949,12 +957,22 @@ app.put('/api/leads/:id/etapa',
             return res.status(400).json({ error: 'Este estatus no permite mover el lead en el embudo.' });
         }
 
-        const query = 'UPDATE leads SET stage_id = ? WHERE id = ?';
-        pool.query(query, [stage_id, id], (error) => {
-            if (error) return res.status(500).json({ error: error.message });
-            res.status(200).json({ mensaje: '🚀 Lead movido con éxito' });
+        const resultado = await moverLeadEtapa(pool, id, stage_id);
+
+        if (resultado.tipo === 'sin_cambio') {
+            return res.status(200).json({ mensaje: 'Sin cambio de etapa' });
+        }
+
+        res.status(200).json({
+            mensaje: '🚀 Lead movido con éxito',
+            movimiento: resultado.tipo,
+            timestamps_creados: resultado.timestamps_creados,
         });
-    });
+    } catch (err) {
+        const codigo = err.codigo || 500;
+        if (codigo >= 500) console.error('❌ Error al mover lead de etapa:', err.message);
+        res.status(codigo).json({ error: err.message || 'Error al mover lead de etapa' });
+    }
 });
 
 // ==========================================
