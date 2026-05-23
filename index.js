@@ -28,8 +28,31 @@ const {
 } = require('./lib/estatus-leads');
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
 
+
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
-app.use(cors());
+// --- SEGURIDAD CORS (Modo Híbrido) ---
+// 1. Leemos las reglas estrictas del archivo .env (si existen en producción)
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+// 2. Combinamos las reglas de producción con tus puertos locales de desarrollo
+const origenesPermitidos = [
+    'https://flow.flising.cloud', // Tu dominio real
+    'http://localhost:5173',      // Vite por defecto
+    'http://localhost:5174',      // El que usas a veces
+    'http://localhost:3000',      // Por si acaso
+    ...corsOrigins                // Sumamos los que el servidor inyecte
+];
+
+// 3. Activamos el cadenero con la lista oficial
+app.use(cors({
+    origin: origenesPermitidos,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
 app.use(express.json());
 
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
@@ -48,16 +71,7 @@ const valorEstimadoValido = (valor) => {
 };
 
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
-const corsOrigins = (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-app.use(cors({
-    origin: corsOrigins.length === 0 ? false : corsOrigins,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json()); 
+
 
 app.use((req, res, next) => {
     console.log(`📢 Petición entrante: ${req.method} ${req.url}`);
@@ -1034,7 +1048,9 @@ transporter.verify().then(() => {
 app.post('/api/cotizaciones', (req, res) => {
     const {
         empresa_id, lead_id, usuario_id, 
-        tipo_activo, valor_activo, plazo, tipo_renta, 
+        tipo_activo, // <-- Sigue funcionando normal
+        marca, modelo, anio, nombre_activo, // <-- AQUÍ ENTRAN TUS 3 CAMPOS + EL COMBINADO
+        valor_activo, plazo, tipo_renta, 
         porcentaje_vr, vr_calculado, pago_inicial, 
         renta_mensual_sin_iva, renta_mensual_con_iva
     } = req.body;
@@ -1043,13 +1059,14 @@ app.post('/api/cotizaciones', (req, res) => {
 
     const query = `
         INSERT INTO cotizaciones 
-        (id, empresa_id, lead_id, usuario_id, tipo_activo, valor_activo, plazo, tipo_renta, porcentaje_vr, vr_calculado, pago_inicial, renta_mensual_sin_iva, renta_mensual_con_iva) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, empresa_id, lead_id, usuario_id, tipo_activo, marca, modelo, anio, nombre_activo, valor_activo, plazo, tipo_renta, porcentaje_vr, vr_calculado, pago_inicial, renta_mensual_sin_iva, renta_mensual_con_iva) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     pool.query(query, [
         nuevaCotizacionId, empresa_id, lead_id || null, usuario_id || null, 
-        tipo_activo, valor_activo, plazo, tipo_renta, 
+        tipo_activo, marca, modelo, anio, nombre_activo, // <-- AQUÍ SE GUARDAN LOS NUEVOS DATOS
+        valor_activo, plazo, tipo_renta, 
         porcentaje_vr, vr_calculado, pago_inicial, 
         renta_mensual_sin_iva, renta_mensual_con_iva
     ], (error) => {
@@ -1060,6 +1077,7 @@ app.post('/api/cotizaciones', (req, res) => {
         res.status(201).json({ mensaje: "✅ Cotización guardada con éxito", id: nuevaCotizacionId });
     });
 });
+
 
 // 2. Obtener todas las cotizaciones de un Prospecto (Lead) en específico
 app.get('/api/cotizaciones/lead/:lead_id', (req, res) => {

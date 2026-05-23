@@ -89,7 +89,10 @@ const CotizadorView = () => {
     nombre_cliente: '', 
     tipoArrendamiento: 'Automotriz', 
     tipoVehiculo: 'Sedan',
-    nombreActivo: '', 
+    nombreActivo: '', // <-- Se usa cuando es 'Otro'
+    marca: '', 
+    modelo: '', 
+    anio: '', 
     valorActivo: '', 
     plazo: '36', 
     tasaAnual: '18',
@@ -228,6 +231,11 @@ const CotizadorView = () => {
     setGuardando(true);
     let finalLeadId = formData.lead_id || null;
 
+    // MAGIA CONDICIONAL: Dependiendo del tipo de arrendamiento, decidimos qué nombre guardar
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
+      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+      : formData.nombreActivo.trim();
+
     try {
       // 1. Si no hay un prospecto asignado, le preguntamos al usuario
       if (!finalLeadId) {
@@ -261,12 +269,16 @@ const CotizadorView = () => {
         }
       }
 
-      // 2. Guardamos la cotización (con o sin lead_id)
+      // 2. Guardamos la cotización con los campos nuevos
       await api.post('/cotizaciones', {
         empresa_id: empresaId, 
         lead_id: finalLeadId, 
         usuario_id: usuarioLogueado.id,
         tipo_activo: formData.tipoArrendamiento === 'Automotriz' ? formData.tipoVehiculo : formData.tipoArrendamiento,
+        marca: formData.tipoArrendamiento === 'Automotriz' ? formData.marca : '',
+        modelo: formData.tipoArrendamiento === 'Automotriz' ? formData.modelo : '',
+        anio: formData.tipoArrendamiento === 'Automotriz' ? formData.anio : '',
+        nombre_activo: nombreCombinado,
         valor_activo: parseFloat(formData.valorActivo), 
         plazo: parseInt(formData.plazo), 
         tipo_renta: 'Vencida',
@@ -336,6 +348,11 @@ const CotizadorView = () => {
     setGenerandoPdf(true);
     let wrapper = null;
 
+    // MAGIA CONDICIONAL: Dependiendo del tipo de arrendamiento, decidimos qué nombre mostrar en el PDF
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
+      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+      : formData.nombreActivo.trim();
+
     const fechaHoy = new Date().toLocaleDateString('es-MX', {
       day: '2-digit', month: 'long', year: 'numeric'
     });
@@ -375,7 +392,8 @@ const CotizadorView = () => {
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PRODUCTO/VEHÍCULO</td>
-            <td style="padding: 3px 0; color: #444;">${formData.nombreActivo}</td>
+            <!-- AQUÍ IMPRIMIMOS EL NOMBRE QUE ELEGIMOS ARRIBA EN EL PDF -->
+            <td style="padding: 3px 0; color: #444;">${nombreCombinado || 'No especificado'}</td>
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PRECIO (IVA INCLUIDO)</td>
@@ -628,7 +646,8 @@ const CotizadorView = () => {
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
         <button 
-          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:''})} 
+          // EL BOTÓN LIMPIAR AHORA TAMBIÉN LIMPIA NOMBREACTIVO Y LOS DE AUTOMOTRIZ
+          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', anio:'', nombreActivo:''})} 
           className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
         >
           Limpiar Campos
@@ -676,6 +695,7 @@ const CotizadorView = () => {
               />
             </div>
 
+            {/* SE CONSERVA EL TIPO DE ARRENDAMIENTO NORMAL */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Tipo de Arrendamiento
@@ -690,37 +710,80 @@ const CotizadorView = () => {
               </select>
             </div>
 
-            {formData.tipoArrendamiento === 'Automotriz' && (
+            {/* SI ES AUTOMOTRIZ, MOSTRAMOS SUS OPCIONES Y CAMPOS */}
+            {formData.tipoArrendamiento === 'Automotriz' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Tipo de Vehículo
+                  </label>
+                  <select 
+                    value={formData.tipoVehiculo} 
+                    onChange={e => setFormData({...formData, tipoVehiculo: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
+                  >
+                    <option value="Sedan">Sedan</option>
+                    <option value="SUV">SUV</option>
+                    <option value="Camionetas">Camionetas</option>
+                    <option value="Lujo">Lujo</option>
+                    <option value="Tractocamion">Tractocamion</option>
+                    <option value="Autobus">Autobus</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Marca
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.marca} 
+                    onChange={e => setFormData({...formData, marca: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. Nissan"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Modelo
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.modelo} 
+                    onChange={e => setFormData({...formData, modelo: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. Versa"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Año
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.anio} 
+                    onChange={e => setFormData({...formData, anio: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. 2024"
+                  />
+                </div>
+              </>
+            ) : (
+              /* SI ES 'OTRO', VOLVEMOS AL CAMPO MANUAL DE SIEMPRE */
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                  Tipo de Vehículo
+                  Nombre del activo
                 </label>
-                <select 
-                  value={formData.tipoVehiculo} 
-                  onChange={e => setFormData({...formData, tipoVehiculo: e.target.value})} 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
-                >
-                  <option value="Sedan">Sedan</option>
-                  <option value="SUV">SUV</option>
-                  <option value="Camionetas">Camionetas</option>
-                  <option value="Lujo">Lujo</option>
-                  <option value="Tractocamion">Tractocamion</option>
-                  <option value="Autobus">Autobus</option>
-                </select>
+                <input 
+                  type="text" 
+                  value={formData.nombreActivo} 
+                  onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                  placeholder="Ej. Maquinaria Industrial Modelo X"
+                />
               </div>
             )}
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                Nombre del activo
-              </label>
-              <input 
-                type="text" 
-                value={formData.nombreActivo} 
-                onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
-              />
-            </div>
 
             <div>
               <label className="block text-xs font-bold text-blue-600 uppercase mb-2">
