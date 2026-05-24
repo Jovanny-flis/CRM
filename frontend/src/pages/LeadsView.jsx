@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import api from '../api';
-import { Users, User, Check, ChevronDown } from 'lucide-react';
+import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 
 const CODIGO_CANCELADO = 'cancelado';
@@ -18,12 +18,18 @@ function LeadsView() {
   const [agentes, setAgentes] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [menuAgentesAbierto, setMenuAgentesAbierto] = useState(false);
-  // NUEVO: Estado para el filtro inteligente
-
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [leadEditando, setLeadEditando] = useState(null); // NUEVO: Guarda el ID del lead a editar
   
-// 1. PRIMERO declaramos tu formData que ya tenías
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [leadEditando, setLeadEditando] = useState(null); 
+  const [modoSoloLectura, setModoSoloLectura] = useState(false);
+  
+  // ESTADOS PARA EL BUSCADOR DE COTIZACIONES
+  const [terminoBusquedaCotizacion, setTerminoBusquedaCotizacion] = useState('');
+  const [sugerenciasCotizaciones, setSugerenciasCotizaciones] = useState([]);
+  const [buscandoCotizaciones, setBuscandoCotizaciones] = useState(false);
+  const [mostrarBuscadorCotizacion, setMostrarBuscadorCotizacion] = useState(false);
+  const buscadorRef = useRef(null);
+  
   const [formData, setFormData] = useState({
     nombre: '', 
     correo: '', 
@@ -34,11 +40,9 @@ function LeadsView() {
     estatus_id: ''
   });
 
-  // 2. SEGUNDO leemos quién es el usuario logueado
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id; 
 
-  // 3. TERCERO (Y AQUÍ ESTÁ EL TRUCO), ponemos el filtro porque AHORA SÍ ya sabemos quién es el usuario
   const [filtroAgente, setFiltroAgente] = useState(
     usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : ''
   );
@@ -107,17 +111,37 @@ function LeadsView() {
     fetchTablero();
   }, []);
 
-  // NUEVA FUNCIÓN: Limpia el formulario y cierra el modal
+  // CARGA AUTOMÁTICA DE COTIZACIONES AL ABRIR EL BUSCADOR
+  useEffect(() => {
+    if (mostrarBuscadorCotizacion && !modoSoloLectura) {
+      const cargarInicial = async () => {
+        setBuscandoCotizaciones(true);
+        try {
+          const res = await api.get(`/cotizaciones/buscar/${empresaId}?termino=`);
+          setSugerenciasCotizaciones(res.data);
+        } catch (error) {
+          console.error("Error cargando cotizaciones libres:", error);
+        } finally {
+          setBuscandoCotizaciones(false);
+        }
+      };
+      cargarInicial();
+    }
+  }, [mostrarBuscadorCotizacion, modoSoloLectura, empresaId]);
+
   const cerrarModal = () => {
     setIsModalOpen(false);
     setLeadEditando(null);
+    setModoSoloLectura(false);
     setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', usuario_id: '', estatus_id: '' });
     setMotivoDesactivacion('');
     setMostrarAvisoCancelacion(false);
     setEstatusOriginalCodigo('activo');
+    setMostrarBuscadorCotizacion(false);
+    setTerminoBusquedaCotizacion('');
+    setSugerenciasCotizaciones([]);
   };
 
-  // NUEVA FUNCIÓN: Abre el modal con los datos del lead a editar
   const esLeadCancelado = (lead) => lead.estatus_codigo === CODIGO_CANCELADO;
   const esLeadMovible = (lead) => !esLeadCancelado(lead) && (lead.estatus_permite_mover === 1 || lead.estatus_permite_mover === true);
   const esLeadEditable = (lead) => !esLeadCancelado(lead);
@@ -126,25 +150,37 @@ function LeadsView() {
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
   const vaACancelarEnFormulario = formData.estatus_id && formData.estatus_id === estatusCanceladoId;
 
-  const abrirModalEditar = (lead) => {
-    if (!esLeadEditable(lead)) return;
-    setLeadEditando(lead.id);
+  const abrirModalEditar = (leadCompleto) => {
+    if (!esLeadEditable(leadCompleto)) return;
+    setModoSoloLectura(false);
+    cargarDatosAlModal(leadCompleto);
+  };
+
+  const abrirModalVer = (leadCompleto) => {
+    setModoSoloLectura(true);
+    cargarDatosAlModal(leadCompleto);
+  };
+
+  const cargarDatosAlModal = (leadCompleto) => {
+    setLeadEditando(leadCompleto);
     setFormData({
-      nombre: lead.nombre || '',
-      correo: lead.correo || '',
-      telefono: lead.telefono || '',
-      valor: lead.valor || '',
-      medio: lead.medio || '',
-      usuario_id: lead.usuario_id || '',
-      estatus_id: lead.estatus_id || ''
+      nombre: leadCompleto.nombre || '',
+      correo: leadCompleto.correo || '',
+      telefono: leadCompleto.telefono || '',
+      valor: leadCompleto.valor || '',
+      medio: leadCompleto.medio || '',
+      usuario_id: leadCompleto.usuario_id || '',
+      estatus_id: leadCompleto.estatus_id || ''
     });
-    setEstatusOriginalCodigo(lead.estatus_codigo || 'activo');
+    setEstatusOriginalCodigo(leadCompleto.estatus_codigo || 'activo');
     setMotivoDesactivacion('');
     setMostrarAvisoCancelacion(false);
     setIsModalOpen(true);
+    setMostrarBuscadorCotizacion(!leadCompleto.cotizacion_id); 
   };
 
   const handleCambioEstatus = (nuevoEstatusId) => {
+    if (modoSoloLectura) return;
     const nuevo = estatusList.find((e) => e.id === nuevoEstatusId);
     if (nuevo?.codigo === CODIGO_CANCELADO && estatusOriginalCodigo !== CODIGO_CANCELADO) {
       setMostrarAvisoCancelacion(true);
@@ -186,8 +222,39 @@ function LeadsView() {
     return {};
   };
 
+  // --- LÓGICA DEL BUSCADOR DE COTIZACIONES ---
+  const handleBuscarCotizacion = async (e) => {
+    if (modoSoloLectura) return;
+    const termino = e.target.value;
+    setTerminoBusquedaCotizacion(termino);
+
+    setBuscandoCotizaciones(true);
+    try {
+      const res = await api.get(`/cotizaciones/buscar/${empresaId}?termino=${termino}`);
+      setSugerenciasCotizaciones(res.data);
+    } catch (error) {
+      console.error("Error buscando cotizaciones:", error);
+    } finally {
+      setBuscandoCotizaciones(false);
+    }
+  };
+
+  const asignarCotizacion = async (cotizacionId) => {
+    if (modoSoloLectura || !leadEditando || !leadEditando.id) return;
+    
+    try {
+      await api.put(`/leads/${leadEditando.id}/vincular-cotizacion`, { cotizacion_id: cotizacionId });
+      alert("✅ Cotización asignada con éxito.");
+      fetchTablero();
+      cerrarModal(); 
+    } catch (error) {
+      alert("❌ Error al asignar cotización: " + (error.response?.data?.error || error.message));
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (modoSoloLectura) return;
 
     if (!valorEstimadoValido(formData.valor)) {
       alert('El valor estimado es obligatorio y debe ser mayor a cero.');
@@ -195,11 +262,8 @@ function LeadsView() {
     }
 
     const valorNumerico = parseFloat(formData.valor);
-
-    // Determinar el agente asignado (Agentes se auto-asignan, Admins eligen)
     const agenteAsignado = usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : formData.usuario_id;
     
-    // Si estamos EDITANDO
     if (leadEditando) {
       if (vaACancelarEnFormulario && !motivoDesactivacion.trim()) {
         alert('Indica el motivo de cancelación antes de guardar.');
@@ -220,7 +284,7 @@ function LeadsView() {
         datosActualizados.motivo_desactivacion = motivoDesactivacion.trim();
       }
 
-      api.put(`/leads/${leadEditando}`, datosActualizados)
+      api.put(`/leads/${leadEditando.id}`, datosActualizados) 
         .then(() => {
           fetchTablero();
           cerrarModal();
@@ -230,7 +294,6 @@ function LeadsView() {
           alert("Error al actualizar: " + msg);
         });
     } 
-    // Si estamos CREANDO
     else {
       const primeraEtapaId = etapas.length > 0 ? etapas[0].id : null;
       const nuevoProspecto = {
@@ -256,7 +319,7 @@ function LeadsView() {
     }
   };
 
-const obtenerLeadsPorEtapaId = (stageId) => {
+  const obtenerLeadsPorEtapaId = (stageId) => {
     return leads.filter(lead => {
       const esDeLaEtapa = lead.stage_id === stageId;
       const esDelAgente = filtroAgente === '' || lead.usuario_id === filtroAgente;
@@ -271,8 +334,7 @@ const obtenerLeadsPorEtapaId = (stageId) => {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
   };
 
-const handleDragStart = (e, leadId) => {
-    // Aseguramos que guardamos el ID como texto
+  const handleDragStart = (e, leadId) => {
     e.dataTransfer.setData("leadId", leadId.toString());
     e.target.style.opacity = "0.5";
     e.target.style.cursor = "grabbing";
@@ -283,7 +345,7 @@ const handleDragStart = (e, leadId) => {
   };
 
   const handleDragOver = (e) => {
-    e.preventDefault(); // Indispensable para permitir el "drop"
+    e.preventDefault(); 
   };
 
   const parseEtapasAlcanzadas = (lead) => {
@@ -355,8 +417,8 @@ const handleDragStart = (e, leadId) => {
   );
 
   return (
-    <div className="font-sans w-full max-w-full min-w-0">
-<header className="mb-8 w-full max-w-full min-w-0 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="font-sans w-full max-w-full min-w-0 pb-20">
+      <header className="mb-8 w-full max-w-full min-w-0 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 shrink">
           <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Tablero de Leads</h1>
           <p className="text-slate-500 mt-1">Gestión de prospectos por equipo</p>
@@ -364,81 +426,75 @@ const handleDragStart = (e, leadId) => {
         
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:justify-end sm:shrink-0">
           
-{(usuarioLogueado.rol === 'super_admin' || usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
-  <div className="relative inline-block text-left min-w-[240px]">
-    {/* Botón Principal */}
-    <button 
-      type="button"
-      onClick={() => setMenuAgentesAbierto(!menuAgentesAbierto)}
-      className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm transition-all hover:bg-slate-50"
-    >
-      <span className="flex items-center gap-2">
-        {filtroAgente === "" ? (
-          <Users size={18} className="text-blue-500" />
-        ) : (
-          <User size={18} className="text-blue-500" />
-        )}
-        {filtroAgente === "" 
-          ? "Todos los agentes" 
-          : agentes.find(a => a.id === filtroAgente)?.nombre || "Seleccionar agente..."}
-      </span>
-      <ChevronDown 
-        size={16} 
-        className={`text-slate-400 transition-transform duration-200 ${menuAgentesAbierto ? 'rotate-180' : ''}`} 
-      />
-    </button>
+          {(usuarioLogueado.rol === 'super_admin' || usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
+            <div className="relative inline-block text-left min-w-[240px]">
+              <button 
+                type="button"
+                onClick={() => setMenuAgentesAbierto(!menuAgentesAbierto)}
+                className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm transition-all hover:bg-slate-50"
+              >
+                <span className="flex items-center gap-2">
+                  {filtroAgente === "" ? (
+                    <Users size={18} className="text-blue-500" />
+                  ) : (
+                    <User size={18} className="text-blue-500" />
+                  )}
+                  {filtroAgente === "" 
+                    ? "Todos los agentes" 
+                    : agentes.find(a => a.id === filtroAgente)?.nombre || "Seleccionar agente..."}
+                </span>
+                <ChevronDown 
+                  size={16} 
+                  className={`text-slate-400 transition-transform duration-200 ${menuAgentesAbierto ? 'rotate-180' : ''}`} 
+                />
+              </button>
 
-    {/* Menú Desplegable (Flotante) */}
-    {menuAgentesAbierto && (
-      <div className="absolute z-10 w-full mt-2 bg-white rounded-xl shadow-lg border border-slate-100 py-1 max-h-60 overflow-y-auto">
-        
-        {/* Opción: Todos los agentes */}
-        <button
-          type="button"
-          onClick={() => {
-            setFiltroAgente("");
-            setMenuAgentesAbierto(false);
-          }}
-          className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
-            filtroAgente === "" ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            <Users size={18} className={filtroAgente === "" ? 'text-blue-600' : 'text-slate-400'} />
-            Todos los agentes
-          </div>
-          {filtroAgente === "" && <Check size={16} className="text-blue-600" />}
-        </button>
+              {menuAgentesAbierto && (
+                <div className="absolute z-10 w-full mt-2 bg-white rounded-xl shadow-lg border border-slate-100 py-1 max-h-60 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiltroAgente("");
+                      setMenuAgentesAbierto(false);
+                    }}
+                    className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
+                      filtroAgente === "" ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Users size={18} className={filtroAgente === "" ? 'text-blue-600' : 'text-slate-400'} />
+                      Todos los agentes
+                    </div>
+                    {filtroAgente === "" && <Check size={16} className="text-blue-600" />}
+                  </button>
 
-        {/* Opciones: Lista de Agentes Dinámica */}
-        {agentes.map(agente => {
-          const esSeleccionado = filtroAgente === agente.id;
-          return (
-            <button
-              key={agente.id}
-              type="button"
-              onClick={() => {
-                setFiltroAgente(agente.id);
-                setMenuAgentesAbierto(false);
-              }}
-              className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
-                esSeleccionado ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <User size={18} className={esSeleccionado ? 'text-blue-600' : 'text-slate-400'} />
-                {agente.nombre}
-              </div>
-              {esSeleccionado && <Check size={16} className="text-blue-600" />}
-            </button>
-          );
-        })}
-      </div>
-    )}
-  </div>
-)}
+                  {agentes.map(agente => {
+                    const esSeleccionado = filtroAgente === agente.id;
+                    return (
+                      <button
+                        key={agente.id}
+                        type="button"
+                        onClick={() => {
+                          setFiltroAgente(agente.id);
+                          setMenuAgentesAbierto(false);
+                        }}
+                        className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
+                          esSeleccionado ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <User size={18} className={esSeleccionado ? 'text-blue-600' : 'text-slate-400'} />
+                          {agente.nombre}
+                        </div>
+                        {esSeleccionado && <Check size={16} className="text-blue-600" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
       
-
           <div className="relative inline-block text-left min-w-[200px]">
             <button
               type="button"
@@ -487,7 +543,7 @@ const handleDragStart = (e, leadId) => {
           </div>
 
           <button 
-            onClick={() => { setLeadEditando(null); setIsModalOpen(true); }}
+            onClick={() => { setLeadEditando(null); setModoSoloLectura(false); setIsModalOpen(true); }}
             disabled={etapas.length === 0}
             className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 whitespace-nowrap ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
           >
@@ -504,7 +560,8 @@ const handleDragStart = (e, leadId) => {
          </div>
       )}
 
-      <div className="flex gap-6 overflow-x-auto pb-6 w-full max-w-full min-w-0">
+      {/* EL TABLERO KANBAN */}
+      <div className="flex gap-6 overflow-x-auto pb-6 w-full max-w-full min-w-0 h-full">
         {etapas.map(etapa => {
           const leadsFiltrados = obtenerLeadsPorEtapaId(etapa.id);
           const sumaTotal = leadsFiltrados.reduce((total, lead) => {
@@ -559,26 +616,47 @@ const handleDragStart = (e, leadId) => {
                       style={{ backgroundColor: lead.estatus_color || (cancelado ? '#94a3b8' : (etapa.color_hex || '#3b82f6')) }}
                     />
                     
-                    {editable && (
+                    {/* BOTONES DE ACCIÓN FLOTANTES: VER Y EDITAR */}
+                    <div className="absolute top-9 right-3 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
                       <button 
                         type="button"
-                        onClick={() => abrirModalEditar(lead)}
-                        className="absolute top-9 right-3 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-md p-1 z-20"
-                        title="Editar Prospecto"
+                        onClick={() => abrirModalVer(lead)}
+                        className="text-slate-400 hover:text-blue-500 bg-white/95 border border-slate-100 rounded-md p-1.5 shadow-sm transition-colors"
+                        title="Ver Detalles"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                        <Eye size={14} />
                       </button>
+                      
+                      {editable && (
+                        <button 
+                          type="button"
+                          onClick={() => abrirModalEditar(lead)}
+                          className="text-slate-400 hover:text-[#ea5533] bg-white/95 border border-slate-100 rounded-md p-1.5 shadow-sm transition-colors"
+                          title="Editar Prospecto"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* ETIQUETA FOLIO COTIZACIÓN EN LA TARJETA */}
+                    {lead.cotizacion_folio && (
+                      <span className={`absolute top-3 right-3 text-[9px] font-black tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none text-white bg-[#ea5533] shadow-sm ${editable ? 'group-hover:opacity-0' : ''}`}>
+                        FL-{String(lead.cotizacion_folio).padStart(3, '0')}
+                      </span>
+                    )}
+                    
+                    {!lead.cotizacion_folio && (
+                      <span className={`absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none ${
+                        cancelado
+                          ? 'text-slate-500 bg-slate-200'
+                          : 'text-slate-600 bg-white/90 border border-slate-200'
+                      } ${editable ? 'group-hover:opacity-0' : ''}`}>
+                        {lead.estatus_nombre || '—'}
+                      </span>
                     )}
 
-                    <span className={`absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none ${
-                      cancelado
-                        ? 'text-slate-500 bg-slate-200'
-                        : 'text-slate-600 bg-white/90 border border-slate-200'
-                    } ${editable ? 'group-hover:opacity-0' : ''}`}>
-                      {lead.estatus_nombre || '—'}
-                    </span>
-                    
-                    <div className={`flex justify-between items-start mb-1 pr-20`}>
+                    <div className={`flex justify-between items-start mb-1 pr-14`}>
                       <p className={`font-bold text-sm truncate ${cancelado ? 'text-slate-500' : 'text-slate-900'}`}>{lead.nombre || "Sin nombre"}</p>
                     </div>
 
@@ -596,17 +674,17 @@ const handleDragStart = (e, leadId) => {
                     </div>
                     
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-[8px] font-bold uppercase" title="Agente asignado">
-                          {agentes.find(a => a.id === lead.usuario_id)?.nombre?.charAt(0) || '?'}
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-medium max-w-[120px]">
+                          <User size={12} className="text-blue-500 shrink-0" />
+                          <span className="truncate" title={lead.agente_nombre || 'Desconocido'}>
+                            {lead.agente_nombre ? lead.agente_nombre.split(' ')[0] : 'Desconocido'}
+                          </span>
                         </div>
                         <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-medium">
                           {lead.medio || MEDIO_DEFAULT}
                         </span>
                       </div>
-                      <span className="text-[9px] text-slate-300 font-mono">
-                        #{lead.id.slice(0, 8)}
-                      </span>
                     </div>
                   </div>
                 );
@@ -617,6 +695,7 @@ const handleDragStart = (e, leadId) => {
         })}
       </div>
 
+      {/* MODAL DE CONFIRMACIÓN DE MOVIMIENTO */}
       {confirmacionMovimiento && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
@@ -646,142 +725,337 @@ const handleDragStart = (e, leadId) => {
         </div>
       )}
 
-      {mostrarAvisoCancelacion && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
-            <p className="text-slate-800 font-semibold text-lg leading-relaxed">
-              Si guardas con estatus cancelado, este lead no podrá cambiar de estatus ni editarse de nuevo.
-            </p>
-            <button
-              type="button"
-              onClick={confirmarAvisoCancelacion}
-              className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
-            >
-              OK
-            </button>
-          </div>
-        </div>
-      )}
-
+      {/* MODAL PRINCIPAL: CREAR/EDITAR LEAD Y VER COTIZACIÓN */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
             <div className="p-8">
               <div className="flex justify-between items-center mb-8">
-                {/* Título dinámico: Nuevo o Editar */}
-                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
-                  {leadEditando ? 'Editar Prospecto' : 'Nuevo Prospecto'}
+                <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
+                  {modoSoloLectura && <Eye className="text-slate-400" size={24} />}
+                  {leadEditando ? (modoSoloLectura ? 'Detalles del Prospecto' : 'Editar Prospecto') : 'Nuevo Prospecto'}
                 </h2>
-                <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-100 rounded-full p-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre Completo *</label>
-                  <input type="text" required value={formData.nombre} onChange={(e) => setFormData({...formData, nombre: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500" placeholder="Ej. Juan Pérez" />
-                </div>
+              <div className={`grid grid-cols-1 ${leadEditando ? 'lg:grid-cols-2 gap-8' : ''}`}>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Correo</label>
-                    <input type="email" value={formData.correo} onChange={(e) => setFormData({...formData, correo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500" placeholder="juan@mail.com" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Teléfono</label>
-                    <input type="text" value={formData.telefono} onChange={(e) => setFormData({...formData, telefono: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500" placeholder="5512345678" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 text-green-600">Valor Estimado ($) *</label>
-                    <input 
-                      type="number" required min="0.01" step="0.01" 
-                      value={formData.valor} 
-                      onChange={(e) => setFormData({...formData, valor: e.target.value})} 
-                      className="w-full bg-green-50 border border-green-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-green-500 font-bold text-green-700" 
-                      placeholder="Ej. 15000" 
-                    />
-                  </div>
-                  <div>
-                    <SelectorCanales
-                      empresaId={empresaId}
-                      value={formData.medio}
-                      onChange={(medio) => setFormData({ ...formData, medio })}
-                      medios={medios}
-                      onMediosActualizados={setMedios}
-                    />
-                  </div>
-                </div>
-
-                {leadEditando && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+                {/* COLUMNA IZQUIERDA: Formulario de Lead */}
+                <div>
+                  <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                        Estatus del prospecto
-                      </label>
-                      <select
-                        value={formData.estatus_id}
-                        onChange={(e) => handleCambioEstatus(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-medium text-slate-800"
-                      >
-                        {estatusList.map((est) => (
-                          <option key={est.id} value={est.id}>
-                            {est.nombre}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-slate-500 mt-1.5">
-                        Cancelar es permanente. Los demás estatus se pueden cambiar después.
-                      </p>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre Completo *</label>
+                      <input 
+                        type="text" required 
+                        value={formData.nombre} 
+                        onChange={(e) => setFormData({...formData, nombre: e.target.value})} 
+                        disabled={modoSoloLectura}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                        placeholder="Ej. Juan Pérez" 
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Correo</label>
+                        <input 
+                          type="email" 
+                          value={formData.correo} 
+                          onChange={(e) => setFormData({...formData, correo: e.target.value})} 
+                          disabled={modoSoloLectura}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                          placeholder="juan@mail.com" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Teléfono</label>
+                        <input 
+                          type="text" 
+                          value={formData.telefono} 
+                          onChange={(e) => setFormData({...formData, telefono: e.target.value})} 
+                          disabled={modoSoloLectura}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                          placeholder="5512345678" 
+                        />
+                      </div>
                     </div>
 
-                    {vaACancelarEnFormulario && (
-                      <div className="animate-in fade-in slide-in-from-top-1">
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                          Motivo de cancelación *
-                        </label>
-                        <textarea
-                          required
-                          value={motivoDesactivacion}
-                          onChange={(e) => setMotivoDesactivacion(e.target.value)}
-                          rows={3}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm"
-                          placeholder="Describe el motivo..."
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>Valor Estimado ($) *</label>
+                        <input 
+                          type="number" required min="0.01" step="0.01" 
+                          value={formData.valor} 
+                          onChange={(e) => setFormData({...formData, valor: e.target.value})} 
+                          disabled={modoSoloLectura}
+                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
+                          placeholder="Ej. 15000" 
                         />
+                      </div>
+                      <div className={modoSoloLectura ? "pointer-events-none opacity-80" : ""}>
+                        <SelectorCanales
+                          empresaId={empresaId}
+                          value={formData.medio}
+                          onChange={(medio) => setFormData({ ...formData, medio })}
+                          medios={medios}
+                          onMediosActualizados={setMedios}
+                        />
+                      </div>
+                    </div>
+
+                    {leadEditando && (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                            Estatus del prospecto
+                          </label>
+                          <select
+                            value={formData.estatus_id}
+                            onChange={(e) => handleCambioEstatus(e.target.value)}
+                            disabled={modoSoloLectura}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none"
+                          >
+                            {estatusList.map((est) => (
+                              <option key={est.id} value={est.id}>
+                                {est.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {vaACancelarEnFormulario && (
+                          <div className="animate-in fade-in slide-in-from-top-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                              Motivo de cancelación *
+                            </label>
+                            <textarea
+                              required
+                              value={motivoDesactivacion}
+                              onChange={(e) => setMotivoDesactivacion(e.target.value)}
+                              disabled={modoSoloLectura}
+                              rows={3}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent"
+                              placeholder="Describe el motivo..."
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {(usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
+                      <div className="animate-in fade-in slide-in-from-top-1">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asignado a:</label>
+                        <select 
+                          value={formData.usuario_id} 
+                          onChange={(e) => setFormData({...formData, usuario_id: e.target.value})} 
+                          disabled={modoSoloLectura}
+                          className="w-full bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 focus:bg-white outline-none appearance-none font-medium text-blue-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent"
+                        >
+                          <option value="">Sin asignar</option>
+                          {agentes.map(agente => (
+                            <option key={agente.id} value={agente.id}>
+                              {agente.nombre} ({agente.rol.replace('_', ' ')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {!modoSoloLectura && (
+                      <div className="pt-6 flex gap-4">
+                        <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all text-lg">
+                          {leadEditando ? '💾 Guardar Cambios' : 'Crear Prospecto'}
+                        </button>
+                      </div>
+                    )}
+                  </form>
+                </div>
+
+                {/* COLUMNA DERECHA: Cotización y Buscador Inteligente */}
+                {leadEditando && (
+                  <div className="flex flex-col h-full bg-slate-50 rounded-2xl p-6 border border-slate-200 relative">
+                    
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
+                        <FileText className="text-[#ea5533]" size={20} />
+                        Cotización Asignada
+                      </h3>
+                      
+                      {/* Botón para cambiar cotización (SOLO EN EDICIÓN) */}
+                      {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && (
+                        <button 
+                          onClick={() => setMostrarBuscadorCotizacion(true)}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-700 underline shrink-0"
+                        >
+                          Cambiar Cotización
+                        </button>
+                      )}
+                    </div>
+
+                    {/* MOSTRAR DATOS SÚPER DETALLADOS DE LA COTIZACIÓN ACTUAL */}
+                    {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion ? (
+                      <div className="bg-[#1e1e1e] text-white rounded-2xl p-6 shadow-xl border border-slate-800 relative overflow-hidden flex-1 flex flex-col">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-[#ea5533]/10 rounded-bl-full pointer-events-none"></div>
+                        
+                        <div className="flex justify-between items-start mb-6">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#ea5533] uppercase tracking-widest">FOLIO</span>
+                            <div className="text-2xl font-black">FL-{String(leadEditando.cotizacion_folio).padStart(3, '0')}</div>
+                          </div>
+                          <span className="bg-white/10 px-3 py-1 rounded-full text-xs font-medium border border-white/20 backdrop-blur-sm shadow-inner">
+                            {leadEditando.cotizacion_plazo} Meses
+                          </span>
+                        </div>
+
+                        <div className="space-y-5 border-t border-white/10 pt-5">
+                          
+                          {/* Fila 1: Producto principal */}
+                          <div>
+                            <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><Package size={14} /> Producto / Activo</div>
+                            <div className="font-bold text-sm bg-black/40 p-3 rounded-xl border border-white/5 shadow-inner">
+                              {leadEditando.cotizacion_activo || leadEditando.cotizacion_tipo_activo || 'No especificado'}
+                            </div>
+                          </div>
+
+                          {/* Fila 2: Detalles Vehiculares (Si existen) */}
+                          {(leadEditando.cotizacion_marca || leadEditando.cotizacion_modelo || leadEditando.cotizacion_anio) && (
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
+                                <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Marca</div>
+                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_marca}>{leadEditando.cotizacion_marca || '-'}</div>
+                              </div>
+                              <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
+                                <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Modelo</div>
+                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_modelo}>{leadEditando.cotizacion_modelo || '-'}</div>
+                              </div>
+                              <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
+                                <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Año</div>
+                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_anio}>{leadEditando.cotizacion_anio || '-'}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Fila 3: Renta y Enganche */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><Calendar size={14} /> Renta Mensual</div>
+                              <div className="font-bold text-lg text-blue-400">
+                                {formatoMoneda(leadEditando.cotizacion_renta)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><DollarSign size={14} /> Pago Inicial</div>
+                              <div className="font-bold text-lg text-green-400">
+                                {formatoMoneda(leadEditando.cotizacion_enganche)}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Fila 4: Valores del activo */}
+                          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10 mt-auto">
+                            <div>
+                              <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Valor del bien</div>
+                              <div className="font-bold text-sm text-slate-200">
+                                {formatoMoneda(leadEditando.cotizacion_valor_activo)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">
+                                Valor Residual ({leadEditando.cotizacion_porcentaje_vr || 0}%)
+                              </div>
+                              <div className="font-bold text-sm text-slate-200">
+                                {formatoMoneda(leadEditando.cotizacion_vr_calculado)}
+                              </div>
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    ) : (
+                      
+                      /* BUSCADOR INTELIGENTE DE COTIZACIONES (Oculto en modo lectura si no hay cotización) */
+                      <div className="flex-1 flex flex-col relative">
+                        
+                        {!modoSoloLectura ? (
+                          <>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                              Vincular Cotización Libre
+                            </label>
+                            <div className="relative shrink-0">
+                              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                              <input 
+                                type="text" 
+                                value={terminoBusquedaCotizacion}
+                                onChange={handleBuscarCotizacion}
+                                placeholder="Buscar por folio o vehículo..." 
+                                className="w-full bg-white border-2 border-slate-300 rounded-xl pl-11 pr-4 py-3 focus:border-[#ea5533] outline-none transition-colors font-medium text-slate-700 shadow-inner"
+                              />
+                            </div>
+
+                            {/* LISTA INTEGRADA DE RESULTADOS */}
+                            <div className="mt-4 flex-1 bg-white rounded-xl shadow-sm border border-slate-200 overflow-y-auto max-h-[350px]">
+                              {buscandoCotizaciones ? (
+                                <div className="p-6 text-center text-slate-400 text-sm font-medium animate-pulse">
+                                  Cargando cotizaciones...
+                                </div>
+                              ) : sugerenciasCotizaciones.length > 0 ? (
+                                <div className="divide-y divide-slate-100">
+                                  {sugerenciasCotizaciones.map(cot => (
+                                    <button 
+                                      key={cot.id}
+                                      onClick={() => asignarCotizacion(cot.id)}
+                                      className="w-full text-left p-4 hover:bg-slate-50 transition-colors group flex justify-between items-center"
+                                    >
+                                      <div>
+                                        <div className="font-black text-slate-800 text-sm group-hover:text-[#ea5533] transition-colors">
+                                          Folio FL-{String(cot.folio).padStart(3, '0')}
+                                        </div>
+                                        <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[180px]">
+                                          {cot.nombre_activo || cot.tipo_activo || 'Sin detalle de vehículo'}
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="font-bold text-blue-600 text-sm">{formatoMoneda(cot.renta_mensual_con_iva)}</div>
+                                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mt-0.5">Mensual</div>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="p-6 text-center text-slate-500 text-sm">
+                                  {terminoBusquedaCotizacion !== '' 
+                                    ? `No encontramos la cotización "${terminoBusquedaCotizacion}".`
+                                    : 'No hay cotizaciones libres en este momento.'}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        ) : null}
+
+                        {/* ESTADO VACÍO CUANDO ES SOLO LECTURA */}
+                        {modoSoloLectura && !leadEditando.cotizacion_id && (
+                           <div className="mt-12 text-center opacity-60 flex flex-col items-center">
+                              <FileText size={48} className="text-slate-400 mb-3" />
+                              <p className="text-sm font-medium text-slate-600">Este prospecto no tiene <br/>ninguna cotización vinculada.</p>
+                           </div>
+                        )}
+                        
+                        {/* BOTÓN CANCELAR BÚSQUEDA */}
+                        {leadEditando.cotizacion_id && !modoSoloLectura && (
+                          <button 
+                            onClick={() => setMostrarBuscadorCotizacion(false)}
+                            className="mt-4 px-4 py-3 text-slate-500 font-bold hover:text-slate-700 text-sm shrink-0"
+                          >
+                            Cancelar cambio
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
                 )}
-
-                {(usuarioLogueado.rol === 'admin_empresa' || usuarioLogueado.rol === 'supervisor') && (
-                  <div className="animate-in fade-in slide-in-from-top-1">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asignar a Agente</label>
-                    <select 
-                      value={formData.usuario_id} 
-                      onChange={(e) => setFormData({...formData, usuario_id: e.target.value})} 
-                      className="w-full bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 focus:bg-white outline-none appearance-none font-medium text-blue-800"
-                    >
-                      <option value="">Dejar sin asignar</option>
-                      {agentes.map(agente => (
-                        <option key={agente.id} value={agente.id}>
-                          {agente.nombre} ({agente.rol.replace('_', ' ')})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="pt-6 flex gap-4">
-                  <button type="button" onClick={cerrarModal} className="flex-1 px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors">Cancelar</button>
-                  <button type="submit" className="flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all">
-                    {/* Botón dinámico */}
-                    {leadEditando ? 'Guardar Cambios' : 'Guardar Lead'}
-                  </button>
-                </div>
-              </form>
+              </div>
             </div>
           </div>
         </div>

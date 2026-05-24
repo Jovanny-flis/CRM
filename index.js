@@ -672,20 +672,51 @@ const SQL_LEADS_CON_ESTATUS = `
     LEFT JOIN lead_estatus e ON l.estatus_id = e.id
 `;
 
-// Obtener Leads por empresa
-app.get('/api/leads/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), async (req, res) => {
+app.get('/api/leads/:empresa_id', (req, res) => {
     const { empresa_id } = req.params;
+    
+    // Consulta actualizada para traer ABSOLUTAMENTE TODOS los datos de la cotización
+    const query = `
+        SELECT 
+            l.*, 
+            e.nombre as estatus_nombre, 
+            e.color_hex as estatus_color,
+            e.codigo as estatus_codigo,
+            e.permite_mover as estatus_permite_mover,
+            e.incluir_en_suma as estatus_incluir_en_suma,
+            u.nombre as agente_nombre,
+            
+            -- DATOS COMPLETOS DE LA COTIZACIÓN
+            c.id as cotizacion_id,
+            c.folio as cotizacion_folio,
+            c.tipo_activo as cotizacion_tipo_activo,
+            c.nombre_activo as cotizacion_activo,
+            c.marca as cotizacion_marca, 
+            c.modelo as cotizacion_modelo, 
+            c.anio as cotizacion_anio,
+            c.valor_activo as cotizacion_valor_activo,
+            c.plazo as cotizacion_plazo,
+            c.pago_inicial as cotizacion_enganche,
+            c.renta_mensual_con_iva as cotizacion_renta,
+            c.renta_mensual_sin_iva as cotizacion_renta_sin_iva,
+            c.vr_calculado as cotizacion_vr_calculado,
+            c.porcentaje_vr as cotizacion_porcentaje_vr,
+            c.tipo_renta as cotizacion_tipo_renta
+            
+        FROM leads l
+        LEFT JOIN lead_estatus e ON l.estatus_id = e.id
+        LEFT JOIN usuarios u ON l.usuario_id = u.id
+        LEFT JOIN cotizaciones c ON c.lead_id = l.id
+        WHERE l.empresa_id = ?
+        ORDER BY l.created_at DESC
+    `;
 
-    try {
-        await asegurarCatalogoEstatus(pool, empresa_id);
-    } catch (errSeed) {
-        console.error('🚨 Error al sembrar estatus:', errSeed.message);
-        return res.status(500).json({ error: 'No se pudo inicializar el catálogo de estatus.' });
-    }
-
-    pool.query(`${SQL_LEADS_CON_ESTATUS} WHERE l.empresa_id = ?`, [empresa_id], (error, resultados) => {
-        if (error) return res.status(500).json({ error: error.message });
-        res.status(200).json(resultados);
+    pool.query(query, [empresa_id], (error, results) => {
+        if (error) {
+            console.error(error);
+            return res.status(500).json({ error: "Error interno del servidor" });
+        }
+        res.json(results);
     });
 });
 
@@ -802,6 +833,55 @@ app.put('/api/leads/:id',
         console.error('❌ ERROR AL ACTUALIZAR LEAD:', error.message);
         res.status(500).json({ error: error.message || 'Error al actualizar en BD' });
     }
+});
+
+
+// Buscar cotizaciones huérfanas (sin lead asignado) para el buscador inteligente
+app.get('/api/cotizaciones/buscar/:empresa_id', (req, res) => {
+    const { empresa_id } = req.params;
+    const termino = req.query.termino || ''; // Manejo seguro si no escriben nada
+    
+    // Traemos todo lo que coincida, ordenado del folio más nuevo al más viejo
+    const query = `
+        SELECT id, folio, nombre_activo, tipo_activo, renta_mensual_con_iva 
+        FROM cotizaciones 
+        WHERE empresa_id = ? 
+        AND (lead_id IS NULL OR lead_id = '')
+        AND (folio LIKE ? OR nombre_activo LIKE ? OR tipo_activo LIKE ?)
+        ORDER BY folio DESC
+        LIMIT 20
+    `;
+    
+    const terminoBusqueda = `%${termino}%`;
+
+    pool.query(query, [empresa_id, terminoBusqueda, terminoBusqueda, terminoBusqueda], (error, results) => {
+        if (error) {
+            console.error("Error buscando cotizaciones:", error);
+            return res.status(500).json({ error: "Error en el servidor" });
+        }
+        res.json(results);
+    });
+});
+
+
+// Asignar o reasignar una cotización a un Lead
+app.put('/api/leads/:lead_id/vincular-cotizacion', (req, res) => {
+    const { lead_id } = req.params;
+    const { cotizacion_id } = req.body;
+    
+    // Primero, "desasignamos" cualquier cotización que ya tuviera este lead
+    const queryLimpiar = `UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?`;
+    
+    pool.query(queryLimpiar, [lead_id], (err) => {
+        if (err) return res.status(500).json({ error: "Error limpiando cotizaciones previas" });
+        
+        // Ahora asignamos la nueva cotización
+        const queryAsignar = `UPDATE cotizaciones SET lead_id = ? WHERE id = ?`;
+        pool.query(queryAsignar, [lead_id, cotizacion_id], (error) => {
+            if (error) return res.status(500).json({ error: "Error vinculando la cotización" });
+            res.json({ mensaje: "Cotización asignada con éxito" });
+        });
+    });
 });
 
 

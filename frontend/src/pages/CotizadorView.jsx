@@ -44,7 +44,7 @@ const montarContenedorPdf = (htmlContent) => {
   return { wrapper, root };
 };
 
-// --- TABLAS DE TOPES RESIDUALES (Directas de tu código) ---
+// --- TABLAS DE TOPES RESIDUALES ---
 const tablaResidual = [
   { min: 12, max: 12, valores: { Sedan: 67, SUV: 70, Camionetas: 68, Lujo: 60, Tractocamion: 65, Autobus: 65 }},
   { min: 13, max: 24, valores: { Sedan: 58, SUV: 63, Camionetas: 60, Lujo: 48, Tractocamion: 52, Autobus: 52 }},
@@ -83,13 +83,12 @@ const CotizadorView = () => {
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
 
-  // --- ESTADO DEL FORMULARIO CON TODOS TUS TOGGLES ---
   const [formData, setFormData] = useState({
     lead_id: '', 
     nombre_cliente: '', 
     tipoArrendamiento: 'Automotriz', 
     tipoVehiculo: 'Sedan',
-    nombreActivo: '', // <-- Se usa cuando es 'Otro'
+    nombreActivo: '', 
     marca: '', 
     modelo: '', 
     anio: '', 
@@ -110,13 +109,9 @@ const CotizadorView = () => {
     servicios: ''
   });
 
-  // --- ESTADOS DE RESULTADOS Y ERRORES ---
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
 
-  // =========================================================
-  // NUEVO: Ahora mandamos el id y el rol al servidor
-  // =========================================================
   const cargarHistorial = () => {
     api.get(`/cotizaciones/empresa/${empresaId}?usuario_id=${usuarioLogueado.id}&rol=${usuarioLogueado.rol}`)
       .then(res => setHistorial(res.data))
@@ -149,7 +144,6 @@ const CotizadorView = () => {
     }));
   };
 
-  // --- EL CEREBRO MATEMÁTICO (Recalcula todo cada vez que escribes) ---
   useEffect(() => {
     let err = {};
     const valorActivo = parseFloat(formData.valorActivo) || 0;
@@ -220,10 +214,6 @@ const CotizadorView = () => {
     });
   }, [formData]);
 
-
-  // =========================================================================
-  // FLUJO DE GUARDAR Y/O CREAR PROSPECTO EN UN SOLO PASO
-  // =========================================================================
   const handleGuardarCotizacion = async () => {
     if (Object.keys(errores).length > 0 || !formData.valorActivo) return alert("Corrige los errores antes de guardar.");
     if (!formData.nombre_cliente) return alert("Escribe el nombre del cliente para poder guardar la cotización.");
@@ -231,13 +221,11 @@ const CotizadorView = () => {
     setGuardando(true);
     let finalLeadId = formData.lead_id || null;
 
-    // MAGIA CONDICIONAL: Dependiendo del tipo de arrendamiento, decidimos qué nombre guardar
     const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
       ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
       : formData.nombreActivo.trim();
 
     try {
-      // 1. Si no hay un prospecto asignado, le preguntamos al usuario
       if (!finalLeadId) {
         const crearProspecto = window.confirm(`¿Deseas generar a "${formData.nombre_cliente}" como un prospecto en tu tablero del CRM? \n\n(Si le das a Cancelar, solo se guardará la cotización)`);
         
@@ -249,7 +237,6 @@ const CotizadorView = () => {
             if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
           }
 
-          // Creamos el prospecto
           await api.post('/leads', {
             empresa_id: empresaId,
             nombre: formData.nombre_cliente,
@@ -261,7 +248,6 @@ const CotizadorView = () => {
             usuario_id: usuarioLogueado.id
           });
 
-          // Buscamos el ID del prospecto recién creado
           const resLeads = await api.get(`/leads/${empresaId}`);
           setLeads(resLeads.data);
           const leadNuevo = resLeads.data.find(l => l.nombre === formData.nombre_cliente);
@@ -269,7 +255,6 @@ const CotizadorView = () => {
         }
       }
 
-      // 2. Guardamos la cotización con los campos nuevos
       await api.post('/cotizaciones', {
         empresa_id: empresaId, 
         lead_id: finalLeadId, 
@@ -290,7 +275,7 @@ const CotizadorView = () => {
       });
 
       alert("✅ Cotización guardada con éxito.");
-      cargarHistorial(); // Refrescamos la tabla
+      cargarHistorial(); 
     } catch (error) {
       alert("❌ Error al guardar: " + error.message);
     } finally {
@@ -298,10 +283,6 @@ const CotizadorView = () => {
     }
   };
 
-
-  // =========================================================================
-  // FUNCIÓN PARA EL BOTÓN "CREAR PROSPECTO" DE LA TABLA (HISTORIAL)
-  // =========================================================================
   const convertirDesdeHistorial = async (cotizacion) => {
     const nombreLead = window.prompt("Nombre del cliente para el nuevo prospecto:", "Cliente Cotización");
     if (!nombreLead) return; 
@@ -348,7 +329,6 @@ const CotizadorView = () => {
     setGenerandoPdf(true);
     let wrapper = null;
 
-    // MAGIA CONDICIONAL: Dependiendo del tipo de arrendamiento, decidimos qué nombre mostrar en el PDF
     const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
       ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
       : formData.nombreActivo.trim();
@@ -646,7 +626,6 @@ const CotizadorView = () => {
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
         <button 
-          // EL BOTÓN LIMPIAR AHORA TAMBIÉN LIMPIA NOMBREACTIVO Y LOS DE AUTOMOTRIZ
           onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', anio:'', nombreActivo:''})} 
           className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
         >
@@ -695,7 +674,6 @@ const CotizadorView = () => {
               />
             </div>
 
-            {/* SE CONSERVA EL TIPO DE ARRENDAMIENTO NORMAL */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Tipo de Arrendamiento
@@ -710,7 +688,6 @@ const CotizadorView = () => {
               </select>
             </div>
 
-            {/* SI ES AUTOMOTRIZ, MOSTRAMOS SUS OPCIONES Y CAMPOS */}
             {formData.tipoArrendamiento === 'Automotriz' ? (
               <>
                 <div>
@@ -770,7 +747,6 @@ const CotizadorView = () => {
                 </div>
               </>
             ) : (
-              /* SI ES 'OTRO', VOLVEMOS AL CAMPO MANUAL DE SIEMPRE */
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                   Nombre del activo
@@ -1012,12 +988,12 @@ const CotizadorView = () => {
                 <th className="p-4 rounded-tl-xl">Fecha</th>
                 <th className="p-4">Prospecto</th>
                 
-                {/* LA COLUMNA DE AGENTE SOLO SE VE SI ERES JEFE O ADMIN */}
                 {usuarioLogueado.rol !== 'agente' && (
                   <th className="p-4 text-blue-600">Agente Creador</th>
                 )}
 
-                <th className="p-4">Tipo de Activo</th>
+                {/* ENCABEZADO ACTUALIZADO */}
+                <th className="p-4">Vehículo / Activo</th>
                 <th className="p-4">Valor</th>
                 <th className="p-4">Renta Mensual</th>
                 <th className="p-4 rounded-tr-xl">Acción</th>
@@ -1027,17 +1003,14 @@ const CotizadorView = () => {
               {historial.map(cot => (
   <tr key={cot.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
     
-    {/* 1. FOLIO */}
     <td className="p-4 text-sm font-black text-slate-800">
       {cot.folio ? `FL-${String(cot.folio).padStart(3, '0')}` : '---'}
     </td>
 
-    {/* 2. FECHA */}
     <td className="p-4 text-sm font-medium text-slate-700">
       {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
     </td>
 
-    {/* 3. PROSPECTO */}
     <td className="p-4 text-sm font-bold text-slate-900">
       {cot.lead_nombre ? (
         <span className="text-blue-600 flex items-center gap-1">
@@ -1049,23 +1022,22 @@ const CotizadorView = () => {
       )}
     </td>
 
-    {/* 4. AGENTE CREADOR (Solo Jefes/Admin) */}
     {usuarioLogueado.rol !== 'agente' && (
       <td className="p-4 text-sm font-medium text-slate-500 bg-blue-50/30">
         {cot.agente_nombre || 'Desconocido'}
       </td>
     )}
 
-    {/* 5. TIPO DE ACTIVO */}
-    <td className="p-4 text-sm text-slate-600">{cot.tipo_activo}</td>
+    {/* AQUÍ COMBINAMOS EL NOMBRE DEL ACTIVO Y EL TIPO DE ACTIVO */}
+    <td className="p-4">
+      <div className="text-sm font-bold text-slate-800">{cot.nombre_activo || '-'}</div>
+      <div className="text-xs text-slate-500 font-medium">{cot.tipo_activo}</div>
+    </td>
 
-    {/* 6. VALOR */}
     <td className="p-4 text-sm font-bold text-blue-600">{formatoMoneda(cot.valor_activo)}</td>
 
-    {/* 7. RENTA MENSUAL */}
     <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
 
-    {/* 8. ACCIÓN */}
     <td className="p-4 text-sm">
       {!cot.lead_nombre && (
         <button 
