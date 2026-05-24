@@ -44,7 +44,7 @@ const montarContenedorPdf = (htmlContent) => {
   return { wrapper, root };
 };
 
-// --- TABLAS DE TOPES RESIDUALES (Directas de tu código) ---
+// --- TABLAS DE TOPES RESIDUALES ---
 const tablaResidual = [
   { min: 12, max: 12, valores: { Sedan: 67, SUV: 70, Camionetas: 68, Lujo: 60, Tractocamion: 65, Autobus: 65 }},
   { min: 13, max: 24, valores: { Sedan: 58, SUV: 63, Camionetas: 60, Lujo: 48, Tractocamion: 52, Autobus: 52 }},
@@ -73,6 +73,20 @@ function calcularPMT(tasaAnual, n, pv, fv) {
   return numerador / denominador;
 }
 
+// NUEVO: Función para formatear el número con comas mientras escribes
+const formatMontoFormulario = (val) => {
+  if (!val) return '';
+  // Quitamos todo lo que no sea número o punto
+  let rawValue = val.toString().replace(/[^0-9.]/g, '');
+  // Evitamos que pongan más de un punto
+  const parts = rawValue.split('.');
+  if (parts.length > 2) rawValue = parts[0] + '.' + parts.slice(1).join('');
+  // Separamos enteros de decimales y ponemos comas
+  const [enteros, decimales] = rawValue.split('.');
+  const enterosFormateados = enteros.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimales !== undefined ? `${enterosFormateados}.${decimales}` : enterosFormateados;
+};
+
 const CotizadorView = () => {
   const [leads, setLeads] = useState([]);
   const [historial, setHistorial] = useState([]); 
@@ -83,13 +97,15 @@ const CotizadorView = () => {
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
 
-  // --- ESTADO DEL FORMULARIO CON TODOS TUS TOGGLES ---
   const [formData, setFormData] = useState({
     lead_id: '', 
     nombre_cliente: '', 
     tipoArrendamiento: 'Automotriz', 
     tipoVehiculo: 'Sedan',
     nombreActivo: '', 
+    marca: '', 
+    modelo: '', 
+    anio: '', 
     valorActivo: '', 
     plazo: '36', 
     tasaAnual: '18',
@@ -107,13 +123,9 @@ const CotizadorView = () => {
     servicios: ''
   });
 
-  // --- ESTADOS DE RESULTADOS Y ERRORES ---
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
 
-  // =========================================================
-  // NUEVO: Ahora mandamos el id y el rol al servidor
-  // =========================================================
   const cargarHistorial = () => {
     api.get(`/cotizaciones/empresa/${empresaId}?usuario_id=${usuarioLogueado.id}&rol=${usuarioLogueado.rol}`)
       .then(res => setHistorial(res.data))
@@ -122,7 +134,7 @@ const CotizadorView = () => {
 
   const cargarLeads = () => {
     api.get(`/leads/${empresaId}`)
-      .then(res => setLeads(res.data))
+      .then(res => setLeads(res.data.filter(l => l.estatus_incluir_en_suma === 1 || l.estatus_incluir_en_suma === true)))
       .catch(console.error);
   };
 
@@ -146,21 +158,21 @@ const CotizadorView = () => {
     }));
   };
 
-  // --- EL CEREBRO MATEMÁTICO (Recalcula todo cada vez que escribes) ---
   useEffect(() => {
     let err = {};
-    const valorActivo = parseFloat(formData.valorActivo) || 0;
+    // MODIFICADO: Removemos las comas antes de convertir a número para el cálculo
+    const valorActivo = parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0;
     const plazo = parseInt(formData.plazo) || 36;
     const tasaAnual = parseFloat(formData.tasaAnual) || 0;
 
     if (tasaAnual < 16 || tasaAnual > 40) err.tasa = "La tasa debe estar entre 16% y 40%.";
     if (plazo < 12 || plazo > 72) err.plazo = "El plazo debe ser entre 12 y 72 meses.";
 
-    const piInput = parseFloat(formData.pagoInicial) || 0;
+    const piInput = parseFloat(String(formData.pagoInicial).replace(/,/g, '')) || 0;
     const inicialReal = formData.isPagoInicialPct ? valorActivo * (piInput / 100) : piInput;
     if (inicialReal > valorActivo * 0.5) err.pagoInicial = "El pago inicial no puede exceder el 50% del valor.";
 
-    const resInput = parseFloat(formData.residual) || 0;
+    const resInput = parseFloat(String(formData.residual).replace(/,/g, '')) || 0;
     const residualReal = formData.isResidualPct ? valorActivo * (resInput / 100) : resInput;
     
     let maxResidualPermitido = 0;
@@ -175,14 +187,14 @@ const CotizadorView = () => {
     if (residualReal > maxResidualPermitido && valorActivo > 0) err.residual = "Excede el tope permitido.";
     if ((residualReal + inicialReal) > valorActivo && valorActivo > 0) err.general = "Suma inicial + residual excede 100%.";
 
-    const comInput = parseFloat(formData.comision) || 0;
+    const comInput = parseFloat(String(formData.comision).replace(/,/g, '')) || 0;
     const comisionReal = formData.isComisionPct ? comInput * (valorActivo - inicialReal) / 100 : comInput;
 
-    const gpsInput = parseFloat(formData.gps) || 0;
+    const gpsInput = parseFloat(String(formData.gps).replace(/,/g, '')) || 0;
     const gpsContado = formData.isGpsContado ? gpsInput : 0;
-    const serviciosReal = parseFloat(formData.servicios) || 0;
+    const serviciosReal = parseFloat(String(formData.servicios).replace(/,/g, '')) || 0;
 
-    const seguroInput = parseFloat(formData.seguro) || 0;
+    const seguroInput = parseFloat(String(formData.seguro).replace(/,/g, '')) || 0;
     let seguroContado = formData.isSeguroContado ? seguroInput : 0;
     let seguroFinanciadoBase = !formData.isSeguroContado ? seguroInput : 0;
 
@@ -217,10 +229,6 @@ const CotizadorView = () => {
     });
   }, [formData]);
 
-
-  // =========================================================================
-  // FLUJO DE GUARDAR Y/O CREAR PROSPECTO EN UN SOLO PASO
-  // =========================================================================
   const handleGuardarCotizacion = async () => {
     if (Object.keys(errores).length > 0 || !formData.valorActivo) return alert("Corrige los errores antes de guardar.");
     if (!formData.nombre_cliente) return alert("Escribe el nombre del cliente para poder guardar la cotización.");
@@ -228,8 +236,11 @@ const CotizadorView = () => {
     setGuardando(true);
     let finalLeadId = formData.lead_id || null;
 
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
+      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+      : formData.nombreActivo.trim();
+
     try {
-      // 1. Si no hay un prospecto asignado, le preguntamos al usuario
       if (!finalLeadId) {
         const crearProspecto = window.confirm(`¿Deseas generar a "${formData.nombre_cliente}" como un prospecto en tu tablero del CRM? \n\n(Si le das a Cancelar, solo se guardará la cotización)`);
         
@@ -241,7 +252,6 @@ const CotizadorView = () => {
             if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
           }
 
-          // Creamos el prospecto
           await api.post('/leads', {
             empresa_id: empresaId,
             nombre: formData.nombre_cliente,
@@ -253,7 +263,6 @@ const CotizadorView = () => {
             usuario_id: usuarioLogueado.id
           });
 
-          // Buscamos el ID del prospecto recién creado
           const resLeads = await api.get(`/leads/${empresaId}`);
           setLeads(resLeads.data);
           const leadNuevo = resLeads.data.find(l => l.nombre === formData.nombre_cliente);
@@ -261,16 +270,20 @@ const CotizadorView = () => {
         }
       }
 
-      // 2. Guardamos la cotización (con o sin lead_id)
       await api.post('/cotizaciones', {
         empresa_id: empresaId, 
         lead_id: finalLeadId, 
         usuario_id: usuarioLogueado.id,
         tipo_activo: formData.tipoArrendamiento === 'Automotriz' ? formData.tipoVehiculo : formData.tipoArrendamiento,
-        valor_activo: parseFloat(formData.valorActivo), 
+        marca: formData.tipoArrendamiento === 'Automotriz' ? formData.marca : '',
+        modelo: formData.tipoArrendamiento === 'Automotriz' ? formData.modelo : '',
+        anio: formData.tipoArrendamiento === 'Automotriz' ? formData.anio : '',
+        nombre_activo: nombreCombinado,
+        // MODIFICADO: Guardar sin comas en la BD
+        valor_activo: parseFloat(String(formData.valorActivo).replace(/,/g, '')), 
         plazo: parseInt(formData.plazo), 
         tipo_renta: 'Vencida',
-        porcentaje_vr: formData.isResidualPct ? parseFloat(formData.residual) : 0, 
+        porcentaje_vr: formData.isResidualPct ? parseFloat(String(formData.residual).replace(/,/g, '')) : 0, 
         vr_calculado: res.residualReal, 
         pago_inicial: res.pagoInicialTotal,
         renta_mensual_sin_iva: res.rentaMensualSubtotal, 
@@ -278,7 +291,7 @@ const CotizadorView = () => {
       });
 
       alert("✅ Cotización guardada con éxito.");
-      cargarHistorial(); // Refrescamos la tabla
+      cargarHistorial(); 
     } catch (error) {
       alert("❌ Error al guardar: " + error.message);
     } finally {
@@ -286,10 +299,6 @@ const CotizadorView = () => {
     }
   };
 
-
-  // =========================================================================
-  // FUNCIÓN PARA EL BOTÓN "CREAR PROSPECTO" DE LA TABLA (HISTORIAL)
-  // =========================================================================
   const convertirDesdeHistorial = async (cotizacion) => {
     const nombreLead = window.prompt("Nombre del cliente para el nuevo prospecto:", "Cliente Cotización");
     if (!nombreLead) return; 
@@ -336,6 +345,10 @@ const CotizadorView = () => {
     setGenerandoPdf(true);
     let wrapper = null;
 
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
+      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+      : formData.nombreActivo.trim();
+
     const fechaHoy = new Date().toLocaleDateString('es-MX', {
       day: '2-digit', month: 'long', year: 'numeric'
     });
@@ -375,11 +388,12 @@ const CotizadorView = () => {
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PRODUCTO/VEHÍCULO</td>
-            <td style="padding: 3px 0; color: #444;">${formData.nombreActivo}</td>
+            <!-- AQUÍ IMPRIMIMOS EL NOMBRE QUE ELEGIMOS ARRIBA EN EL PDF -->
+            <td style="padding: 3px 0; color: #444;">${nombreCombinado || 'No especificado'}</td>
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PRECIO (IVA INCLUIDO)</td>
-            <td style="padding: 3px 0; color: #444;">${formatoMoneda(formData.valorActivo)} MXN</td>
+            <td style="padding: 3px 0; color: #444;">${formatoMoneda(parseFloat(String(formData.valorActivo).replace(/,/g, '')))} MXN</td>
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PLAZO (MESES)</td>
@@ -628,7 +642,7 @@ const CotizadorView = () => {
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
         <button 
-          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:''})} 
+          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', anio:'', nombreActivo:''})} 
           className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
         >
           Limpiar Campos
@@ -690,48 +704,90 @@ const CotizadorView = () => {
               </select>
             </div>
 
-            {formData.tipoArrendamiento === 'Automotriz' && (
+            {formData.tipoArrendamiento === 'Automotriz' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Tipo de Vehículo
+                  </label>
+                  <select 
+                    value={formData.tipoVehiculo} 
+                    onChange={e => setFormData({...formData, tipoVehiculo: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
+                  >
+                    <option value="Sedan">Sedan</option>
+                    <option value="SUV">SUV</option>
+                    <option value="Camionetas">Camionetas</option>
+                    <option value="Lujo">Lujo</option>
+                    <option value="Tractocamion">Tractocamion</option>
+                    <option value="Autobus">Autobus</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Marca
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.marca} 
+                    onChange={e => setFormData({...formData, marca: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. Nissan"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Modelo
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.modelo} 
+                    onChange={e => setFormData({...formData, modelo: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. Versa"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Año
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.anio} 
+                    onChange={e => setFormData({...formData, anio: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. 2024"
+                  />
+                </div>
+              </>
+            ) : (
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                  Tipo de Vehículo
+                  Nombre del activo
                 </label>
-                <select 
-                  value={formData.tipoVehiculo} 
-                  onChange={e => setFormData({...formData, tipoVehiculo: e.target.value})} 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
-                >
-                  <option value="Sedan">Sedan</option>
-                  <option value="SUV">SUV</option>
-                  <option value="Camionetas">Camionetas</option>
-                  <option value="Lujo">Lujo</option>
-                  <option value="Tractocamion">Tractocamion</option>
-                  <option value="Autobus">Autobus</option>
-                </select>
+                <input 
+                  type="text" 
+                  value={formData.nombreActivo} 
+                  onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                  placeholder="Ej. Maquinaria Industrial Modelo X"
+                />
               </div>
             )}
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                Nombre del activo
-              </label>
-              <input 
-                type="text" 
-                value={formData.nombreActivo} 
-                onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
-              />
-            </div>
 
             <div>
               <label className="block text-xs font-bold text-blue-600 uppercase mb-2">
                 Valor del Activo
               </label>
               <input 
-                type="number" 
+                type="text" 
+                inputMode="decimal"
                 value={formData.valorActivo} 
-                onChange={e => setFormData({...formData, valorActivo: e.target.value})} 
+                onChange={e => setFormData({...formData, valorActivo: formatMontoFormulario(e.target.value)})} 
                 className="w-full bg-blue-50 border border-blue-200 text-blue-800 font-bold rounded-xl px-4 py-3 outline-none focus:border-blue-500" 
-                placeholder="Ej. 350000" 
+                placeholder="Ej. 350,000" 
               />
             </div>
 
@@ -949,12 +1005,12 @@ const CotizadorView = () => {
                 <th className="p-4 rounded-tl-xl">Fecha</th>
                 <th className="p-4">Prospecto</th>
                 
-                {/* LA COLUMNA DE AGENTE SOLO SE VE SI ERES JEFE O ADMIN */}
                 {usuarioLogueado.rol !== 'agente' && (
                   <th className="p-4 text-blue-600">Agente Creador</th>
                 )}
 
-                <th className="p-4">Tipo de Activo</th>
+                {/* ENCABEZADO ACTUALIZADO */}
+                <th className="p-4">Vehículo / Activo</th>
                 <th className="p-4">Valor</th>
                 <th className="p-4">Renta Mensual</th>
                 <th className="p-4 rounded-tr-xl">Acción</th>
@@ -964,17 +1020,14 @@ const CotizadorView = () => {
               {historial.map(cot => (
   <tr key={cot.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
     
-    {/* 1. FOLIO */}
     <td className="p-4 text-sm font-black text-slate-800">
       {cot.folio ? `FL-${String(cot.folio).padStart(3, '0')}` : '---'}
     </td>
 
-    {/* 2. FECHA */}
     <td className="p-4 text-sm font-medium text-slate-700">
       {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
     </td>
 
-    {/* 3. PROSPECTO */}
     <td className="p-4 text-sm font-bold text-slate-900">
       {cot.lead_nombre ? (
         <span className="text-blue-600 flex items-center gap-1">
@@ -986,23 +1039,22 @@ const CotizadorView = () => {
       )}
     </td>
 
-    {/* 4. AGENTE CREADOR (Solo Jefes/Admin) */}
     {usuarioLogueado.rol !== 'agente' && (
       <td className="p-4 text-sm font-medium text-slate-500 bg-blue-50/30">
         {cot.agente_nombre || 'Desconocido'}
       </td>
     )}
 
-    {/* 5. TIPO DE ACTIVO */}
-    <td className="p-4 text-sm text-slate-600">{cot.tipo_activo}</td>
+    {/* AQUÍ COMBINAMOS EL NOMBRE DEL ACTIVO Y EL TIPO DE ACTIVO */}
+    <td className="p-4">
+      <div className="text-sm font-bold text-slate-800">{cot.nombre_activo || '-'}</div>
+      <div className="text-xs text-slate-500 font-medium">{cot.tipo_activo}</div>
+    </td>
 
-    {/* 6. VALOR */}
     <td className="p-4 text-sm font-bold text-blue-600">{formatoMoneda(cot.valor_activo)}</td>
 
-    {/* 7. RENTA MENSUAL */}
     <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
 
-    {/* 8. ACCIÓN */}
     <td className="p-4 text-sm">
       {!cot.lead_nombre && (
         <button 

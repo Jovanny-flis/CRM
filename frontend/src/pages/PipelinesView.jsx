@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
+import AdminEstatusLeads from '../components/AdminEstatusLeads';
 
 const PipelinesView = () => {
   const [pipelines, setPipelines] = useState([]);
@@ -418,6 +419,10 @@ const PipelinesView = () => {
                 )}
               </div>
             ))}
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mt-8">
+            <AdminEstatusLeads empresaId={empresaId} />
           </div>
         </div>
       )}

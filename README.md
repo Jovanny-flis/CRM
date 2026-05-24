@@ -7,7 +7,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 - Backend Node.js + Express (`index.js`), persistencia con MariaDB/MySQL vía `mysql2` y pool en `db.js`.
 - Frontend React + Vite en `frontend/`.
 - Autenticación de usuarios con Firebase Auth (cliente) y Firebase Admin (servidor); perfil operativo y roles en base de datos.
-- DDL versionado en `db/schema.sql`.
+- DDL base en `db/schema.sql`; evolución en `db/migrations/schema-v2.sql` (idempotente).
 
 | Módulo             | Descripción |
 | ------------------ | ----------- |
@@ -15,7 +15,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Empresas           | CRUD de empresas (alcance `super_admin` en API). |
 | Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa. |
 | Pipelines y etapas | Embudos y etapas por empresa. |
-| Leads              | Prospectos, medios (`lead_sources`) y cambio de etapa. |
+| Leads              | Prospectos, canales (`lead_sources`), estatus configurables (`lead_estatus`), tablero Kanban con drag & drop, confirmación al avanzar de etapa, trazabilidad temporal por etapa (`lead_etapas_historial`) y cancelación con motivo. |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). |
 | Cotizador          | Cálculo de arrendamiento, guardado de cotizaciones e historial. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
 
@@ -84,7 +84,15 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 CRM/
 ├── db.js
 ├── db/
-│   └── schema.sql
+│   ├── schema.sql
+│   ├── seeds/
+│   └── migrations/
+│       ├── README.md
+│       └── schema-v2.sql
+├── lib/
+│   ├── canales.js
+│   ├── estatus-leads.js
+│   └── lead-etapas-historial.js
 ├── eslint.config.mjs
 ├── firebase.js
 ├── index.js
@@ -116,6 +124,8 @@ CRM/
         ├── index.css
         ├── main.jsx
         ├── components/
+        │   ├── AdminEstatusLeads.jsx
+        │   ├── SelectorCanales.jsx
         │   └── Sidebar.jsx
         ├── layouts/
         │   └── DashboardLayout.jsx
@@ -126,7 +136,7 @@ CRM/
             ├── EmpresasView.jsx
             ├── LeadsView.jsx
             ├── LoginView.jsx
-        └── PipelinesView.jsx
+            └── PipelinesView.jsx
 ```
 
 La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en la raíz (listado en `.gitignore`; no incluir claves en el repositorio).
@@ -164,19 +174,26 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 
 6. Crear la base ejecutando `db/schema.sql` en el servidor SQL (crea `flising_crm` y tablas).
 
-7. Dar de alta usuarios en Firebase Auth y filas en `usuarios` con `firebase_uid` coherente (el alta vía API crea ambos). Para un `super_admin` inicial, seguir el bloque comentado al final de `db/schema.sql` y la consola de Firebase según el procedimiento del equipo.
+7. Si la BD ya existía o es instalación que debe incluir canales jerárquicos, estatus de prospectos y trazabilidad de etapas, aplicar la migración unificada (segura de re-ejecutar):
+   ```bash
+   mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
+   ```
+   En clientes gráficos (p. ej. DBeaver) usar **Execute SQL Script** (Alt+X), no una sola sentencia con Ctrl+Enter, para que corra el archivo completo incluido `DELIMITER` y `CREATE TABLE`.
+   Detalle en `db/migrations/README.md`.
 
-8. Arrancar el backend:
+8. Dar de alta usuarios en Firebase Auth y filas en `usuarios` con `firebase_uid` coherente (el alta vía API crea ambos). Para un `super_admin` inicial, seguir el bloque comentado al final de `db/schema.sql` y la consola de Firebase según el procedimiento del equipo.
+
+9. Arrancar el backend:
    ```bash
    node index.js
    ```
 
-9. Arrancar el frontend:
+10. Arrancar el frontend:
    ```bash
    cd frontend && npm run dev
    ```
 
-10. Por defecto el frontend de desarrollo suele atender en el puerto `5173` y la API en `PORT` (por defecto `3000`). La URL base de la API debe coincidir con `VITE_API_URL`, y el origen del navegador (p. ej. `http://localhost:5173`) debe figurar en `CORS_ORIGINS`.
+11. Por defecto el frontend de desarrollo suele atender en el puerto `5173` y la API en `PORT` (por defecto `3000`). La URL base de la API debe coincidir con `VITE_API_URL`, y el origen del navegador (p. ej. `http://localhost:5173`) debe figurar en `CORS_ORIGINS`.
 
 ---
 
@@ -216,14 +233,19 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 
 Relaciones principales:
 
-- `empresas` (1) → (N) `usuarios`, `pipelines`, `lead_sources`
+- `empresas` (1) → (N) `usuarios`, `pipelines`, `lead_sources`, `lead_estatus`
 - `pipelines` (1) → (N) `pipeline_stages`
 - `pipeline_stages` (1) → (N) `leads`
+- `leads` (1) → (N) `lead_etapas_historial` (una fila por etapa alcanzada hacia adelante)
+- `pipeline_stages` (1) → (N) `lead_etapas_historial`
+- `lead_estatus` (1) → (N) `leads` vía `estatus_id`
 - `usuarios` (1) → (N) `leads`, `cotizaciones` (campos opcionales según tabla)
 - `leads` (0..1) → (N) `cotizaciones`
 - `clientes_globales` (0..1) → (N) `leads` vía `cliente_global_id`
 
-DDL alineado con `db/schema.sql`:
+**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa; tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`.
+
+DDL base en `db/schema.sql`:
 
 ```sql
 CREATE TABLE `empresas` (
@@ -294,10 +316,13 @@ CREATE TABLE `lead_sources` (
   `id` varchar(36) NOT NULL,
   `empresa_id` int(11) DEFAULT NULL,
   `nombre` varchar(100) NOT NULL,
+  `parent_id` varchar(36) DEFAULT NULL COMMENT 'Canal padre; NULL = canal raíz',
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `empresa_id` (`empresa_id`),
-  CONSTRAINT `fk_lead_sources_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`)
+  KEY `idx_lead_sources_parent` (`parent_id`),
+  CONSTRAINT `fk_lead_sources_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`),
+  CONSTRAINT `fk_lead_sources_parent` FOREIGN KEY (`parent_id`) REFERENCES `lead_sources` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `leads` (
@@ -355,12 +380,12 @@ Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api
 
 ### Empresas (`verificarToken` + `revisarRol(['super_admin'])`)
 
-| Método | Endpoint |
-| ------ | -------- |
-| GET | `/empresas` |
-| POST | `/empresas` |
-| PUT | `/empresas/:id` |
-| DELETE | `/empresas/:id` |
+| Método | Endpoint | Notas |
+| ------ | -------- | ----- |
+| GET | `/empresas` | Listado global |
+| POST | `/empresas` | Semilla catálogo raíz de canales (`sembrarCanalesDefaultEmpresa`) |
+| PUT | `/empresas/:id` | |
+| DELETE | `/empresas/:id` | |
 
 ### Usuarios
 
@@ -383,15 +408,76 @@ Prefijo efectivo: las rutas siguientes están definidas en `index.js` como `/api
 | POST | `/etapas` | mismos | El pipeline objetivo debe pertenecer a la empresa del usuario |
 | PUT | `/etapas/:id` | mismos | `validarRecursoEmpresa` (vía JOIN con `pipelines`) |
 
-### Leads y medios
+### Leads y canales (API `medios`)
+
+En la interfaz la sección se llama **Canales**; en base de datos y API se mantiene la nomenclatura histórica (`lead_sources`, columna `leads.medio`, rutas `/api/medios`).
 
 | Método | Endpoint | Roles | Aislamiento por empresa |
 | ------ | -------- | ----- | ----------------------- |
-| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam` |
-| POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario |
+| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `etapas_alcanzadas` (IDs de etapas con timestamp) |
+| POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario; registra timestamp de etapa inicial |
 | PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead) |
-| PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa` (empresa del lead) |
-| GET | `/medios/:empresa_id` | mismos | `validarEmpresaParam` |
+| PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa`; mueve en el embudo y aplica reglas de `lead_etapas_historial` |
+| GET | `/estatus-leads/:empresa_id` | mismos | Catálogo por empresa; semilla `activo` / `cancelado` |
+| POST | `/estatus-leads` | `super_admin`, `admin_empresa` | Alta de estatus personalizado |
+| PUT | `/estatus-leads/:id` | mismos | Renombrar / color / flags (sistema: reglas fijas) |
+| PUT | `/estatus-leads/reordenar` | mismos | Orden de estatus intermedios |
+| DELETE | `/estatus-leads/:id` | mismos | Reasigna leads afectados a `activo` |
+| GET | `/medios/:empresa_id` | mismos | `validarEmpresaParam`; solo lista canales (sin re-sembrar) |
+| POST | `/medios` | mismos | `empresa_id` del body; cualquier usuario autenticado puede CRUD |
+| PUT | `/medios/:id` | mismos | `validarRecursoEmpresa` (empresa del canal) |
+| DELETE | `/medios/:id` | mismos | `validarRecursoEmpresa`; no modifica `leads.medio` histórico |
+
+**Catálogo de canales (`lead_sources`):**
+
+- En UI la sección se llama **Canales**; en BD/API se mantiene `lead_sources`, columna `leads.medio` y rutas `/api/medios`.
+- Jerarquía opcional con `parent_id` (subcanales). Al eliminar un canal padre, sus subcanales se eliminan en cascada (`ON DELETE CASCADE`).
+- El valor persistido en el lead es el **nombre** del canal o subcanal elegido (`leads.medio`), no el UUID del catálogo. Eliminar un canal del catálogo no altera el texto ya guardado en leads.
+- **Default:** `Contacto directo` (`MEDIO_DEFAULT` en `lib/canales.js` y `SelectorCanales.jsx`). Al crear/editar un lead sin selección explícita se persiste ese valor.
+- **Catálogo raíz estándar** (9 canales, iguales para todas las empresas): Referidos de clientes, Marketing digital, Socios, Agentes, Eventos empresariales, Concesionarios, Webinars, Contacto directo, Cotizador. Definido en `lib/canales.js`.
+- **Subcanales:** no se siembran en migración ni en semilla automática del backend. Cada empresa los crea desde el front:
+  - Botón **Nuevo** (pie del combobox): canal raíz.
+  - Menú ⋮ de un canal raíz → **Nuevo subcanal**: alta bajo ese padre.
+  - Menú ⋮ → Editar / Eliminar en cualquier canal o subcanal.
+- **Semilla en runtime:** al crear una empresa (`POST /api/empresas`) se insertan las raíces faltantes vía `sembrarCanalesDefaultEmpresa` en `lib/canales.js`. `GET /api/medios/:empresa_id` **solo lista** el catálogo existente (no re-sembrar). Empresas antiguas dependen de `schema-v2.sql` o del alta de empresa para tener el catálogo raíz.
+- **UI:** `frontend/src/components/SelectorCanales.jsx` — combobox con listas anidadas (flecha `>` por canal con hijos), portal flotante para scroll fuera del modal, CRUD inline.
+
+**Migración SQL (estado actual del repo)**
+
+| Archivo | Uso |
+| ------- | --- |
+| `db/schema.sql` | Instalación nueva: esquema base completo. **No modificar.** |
+| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Aplicar sobre BD existente después de `schema.sql`. Incluye canales jerárquicos, catálogo raíz, estatus de prospectos, trazabilidad de etapas y datos iniciales. |
+| `db/migrations/README.md` | Instrucciones y tabla de registro `_crm_migraciones`. |
+
+```bash
+mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
+```
+
+**Qué hace `schema-v2.sql` (resumen):**
+
+| Bloque | Detalle |
+| ------ | ------- |
+| `leads` | `activo` (legado), `motivo_desactivacion`, `desactivado_at`, `estatus_id` |
+| `lead_sources` | `parent_id` + FK; limpieza de raíces no estándar e inserción del catálogo de 9 canales por empresa |
+| `leads.medio` | Normalización única a `Contacto directo` (no se repite si ya consta en `_crm_migraciones`) |
+| `lead_estatus` | Tabla + semilla `activo` / `cancelado` por empresa; asigna `estatus_id` según `activo` histórico |
+| `lead_etapas_historial` | Tabla con `UNIQUE (lead_id, stage_id)` y `alcanzado_at`; sin backfill en leads existentes |
+
+**Complemento en runtime:** `lib/canales.js` (semilla al crear empresa), `lib/estatus-leads.js` (catálogo de estatus en `GET` de leads/estatus) y `lib/lead-etapas-historial.js` (timestamps al crear lead y al mover de etapa).
+
+**Estatus de prospectos:** catálogo por empresa en Pipelines (sección bajo el embudo, componente `AdminEstatusLeads.jsx`). Sistema: `activo` (inicial, suma, mueve) y `cancelado` (oculto en suma, bloqueado, motivo obligatorio). Los personalizados definen color, suma y movilidad. La app usa `estatus_id`; no el booleano `activo`.
+
+**Trazabilidad de etapas (`lead_etapas_historial`):**
+
+- Al **crear** un lead con `stage_id`, se registra la etapa inicial (`registrarEtapaInicial`).
+- Al **avanzar** en el embudo (`PUT /leads/:id/etapa`, orden destino > origen), se insertan timestamps solo para etapas intermedias y destino que aún no tengan registro; si se **salta** etapas, comparten el mismo `alcanzado_at`.
+- Al **retroceder**, solo se actualiza `leads.stage_id`; no se crean ni modifican filas del historial.
+- Al **re-avanzar** hacia etapas ya registradas, no hay nuevos timestamps (la restricción `UNIQUE` impide duplicados).
+- Leads existentes antes del deploy **no** reciben backfill; el historial empieza con movimientos posteriores a la migración (y con leads nuevos desde el alta).
+- **UI (`LeadsView.jsx`):** popup de confirmación solo si el avance cubriría al menos una etapa sin timestamp; retroceso y re-avance sobre etapas ya registradas mueven sin popup. Soltar en la misma columna se ignora.
+
+Los subcanales y estatus personalizados se gestionan desde el front tras la migración.
 
 ### Cotizador (API pública por decisión de producto)
 
@@ -449,8 +535,9 @@ Endpoints que reciben `empresa_id` en el body (`POST /api/leads`, `POST /api/pip
 ## 12. Próximos pasos sugeridos
 
 - Valorar custom claims de Firebase si conviene reducir la consulta de perfil que hace `verificarToken` (hoy 1 query/request).
-- Introducir herramienta o convención de migraciones SQL encima de `db/schema.sql`.
+- Introducir pipeline de CI/CD; incluir `db/migrations/schema-v2.sql` en el despliegue de BD existentes.
 - Modularizar el backend (rutas, controladores, servicios).
 - Dejar ESLint sin errores y mantener reglas en CI.
 - Añadir pruebas automatizadas y un pipeline mínimo de integración continua.
 - Logging estructurado y manejo centralizado de errores.
+- Pantalla de consulta del historial temporal de etapas por lead (`lead_etapas_historial`), cuando el producto lo requiera (hoy los datos se persisten en BD sin UI).
