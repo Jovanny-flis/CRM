@@ -73,6 +73,20 @@ function calcularPMT(tasaAnual, n, pv, fv) {
   return numerador / denominador;
 }
 
+// NUEVO: Función para formatear el número con comas mientras escribes
+const formatMontoFormulario = (val) => {
+  if (!val) return '';
+  // Quitamos todo lo que no sea número o punto
+  let rawValue = val.toString().replace(/[^0-9.]/g, '');
+  // Evitamos que pongan más de un punto
+  const parts = rawValue.split('.');
+  if (parts.length > 2) rawValue = parts[0] + '.' + parts.slice(1).join('');
+  // Separamos enteros de decimales y ponemos comas
+  const [enteros, decimales] = rawValue.split('.');
+  const enterosFormateados = enteros.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimales !== undefined ? `${enterosFormateados}.${decimales}` : enterosFormateados;
+};
+
 const CotizadorView = () => {
   const [leads, setLeads] = useState([]);
   const [historial, setHistorial] = useState([]); 
@@ -146,18 +160,19 @@ const CotizadorView = () => {
 
   useEffect(() => {
     let err = {};
-    const valorActivo = parseFloat(formData.valorActivo) || 0;
+    // MODIFICADO: Removemos las comas antes de convertir a número para el cálculo
+    const valorActivo = parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0;
     const plazo = parseInt(formData.plazo) || 36;
     const tasaAnual = parseFloat(formData.tasaAnual) || 0;
 
     if (tasaAnual < 16 || tasaAnual > 40) err.tasa = "La tasa debe estar entre 16% y 40%.";
     if (plazo < 12 || plazo > 72) err.plazo = "El plazo debe ser entre 12 y 72 meses.";
 
-    const piInput = parseFloat(formData.pagoInicial) || 0;
+    const piInput = parseFloat(String(formData.pagoInicial).replace(/,/g, '')) || 0;
     const inicialReal = formData.isPagoInicialPct ? valorActivo * (piInput / 100) : piInput;
     if (inicialReal > valorActivo * 0.5) err.pagoInicial = "El pago inicial no puede exceder el 50% del valor.";
 
-    const resInput = parseFloat(formData.residual) || 0;
+    const resInput = parseFloat(String(formData.residual).replace(/,/g, '')) || 0;
     const residualReal = formData.isResidualPct ? valorActivo * (resInput / 100) : resInput;
     
     let maxResidualPermitido = 0;
@@ -172,14 +187,14 @@ const CotizadorView = () => {
     if (residualReal > maxResidualPermitido && valorActivo > 0) err.residual = "Excede el tope permitido.";
     if ((residualReal + inicialReal) > valorActivo && valorActivo > 0) err.general = "Suma inicial + residual excede 100%.";
 
-    const comInput = parseFloat(formData.comision) || 0;
+    const comInput = parseFloat(String(formData.comision).replace(/,/g, '')) || 0;
     const comisionReal = formData.isComisionPct ? comInput * (valorActivo - inicialReal) / 100 : comInput;
 
-    const gpsInput = parseFloat(formData.gps) || 0;
+    const gpsInput = parseFloat(String(formData.gps).replace(/,/g, '')) || 0;
     const gpsContado = formData.isGpsContado ? gpsInput : 0;
-    const serviciosReal = parseFloat(formData.servicios) || 0;
+    const serviciosReal = parseFloat(String(formData.servicios).replace(/,/g, '')) || 0;
 
-    const seguroInput = parseFloat(formData.seguro) || 0;
+    const seguroInput = parseFloat(String(formData.seguro).replace(/,/g, '')) || 0;
     let seguroContado = formData.isSeguroContado ? seguroInput : 0;
     let seguroFinanciadoBase = !formData.isSeguroContado ? seguroInput : 0;
 
@@ -264,10 +279,11 @@ const CotizadorView = () => {
         modelo: formData.tipoArrendamiento === 'Automotriz' ? formData.modelo : '',
         anio: formData.tipoArrendamiento === 'Automotriz' ? formData.anio : '',
         nombre_activo: nombreCombinado,
-        valor_activo: parseFloat(formData.valorActivo), 
+        // MODIFICADO: Guardar sin comas en la BD
+        valor_activo: parseFloat(String(formData.valorActivo).replace(/,/g, '')), 
         plazo: parseInt(formData.plazo), 
         tipo_renta: 'Vencida',
-        porcentaje_vr: formData.isResidualPct ? parseFloat(formData.residual) : 0, 
+        porcentaje_vr: formData.isResidualPct ? parseFloat(String(formData.residual).replace(/,/g, '')) : 0, 
         vr_calculado: res.residualReal, 
         pago_inicial: res.pagoInicialTotal,
         renta_mensual_sin_iva: res.rentaMensualSubtotal, 
@@ -377,7 +393,7 @@ const CotizadorView = () => {
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PRECIO (IVA INCLUIDO)</td>
-            <td style="padding: 3px 0; color: #444;">${formatoMoneda(formData.valorActivo)} MXN</td>
+            <td style="padding: 3px 0; color: #444;">${formatoMoneda(parseFloat(String(formData.valorActivo).replace(/,/g, '')))} MXN</td>
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PLAZO (MESES)</td>
@@ -766,11 +782,12 @@ const CotizadorView = () => {
                 Valor del Activo
               </label>
               <input 
-                type="number" 
+                type="text" 
+                inputMode="decimal"
                 value={formData.valorActivo} 
-                onChange={e => setFormData({...formData, valorActivo: e.target.value})} 
+                onChange={e => setFormData({...formData, valorActivo: formatMontoFormulario(e.target.value)})} 
                 className="w-full bg-blue-50 border border-blue-200 text-blue-800 font-bold rounded-xl px-4 py-3 outline-none focus:border-blue-500" 
-                placeholder="Ej. 350000" 
+                placeholder="Ej. 350,000" 
               />
             </div>
 
