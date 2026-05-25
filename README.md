@@ -17,7 +17,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Pipelines y etapas | Embudos y etapas por empresa. |
 | Leads              | Prospectos, canales (`lead_sources`), estatus configurables (`lead_estatus`), tablero Kanban con drag & drop, confirmación al avanzar de etapa, trazabilidad temporal por etapa (`lead_etapas_historial`) y cancelación con motivo. |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). |
-| Cotizador          | Cálculo de arrendamiento, guardado de cotizaciones e historial. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
+| Cotizador          | Cálculo de arrendamiento y guardado de cotizaciones con folio secuencial (FL-001…). Soporta tipo **Automotriz** con campos `marca`, `modelo` y `año`. Las cotizaciones pueden vincularse a un lead desde el tablero Kanban; el lead muestra el detalle de la cotización asignada en su modal. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
 
 ---
 
@@ -243,7 +243,7 @@ Relaciones principales:
 - `leads` (0..1) → (N) `cotizaciones`
 - `clientes_globales` (0..1) → (N) `leads` vía `cliente_global_id`
 
-**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa; tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`.
+**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa; tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`; en `cotizaciones`: `folio` (AUTO_INCREMENT, identificador visible FL-001…), `nombre_activo`, `marca`, `modelo`, `anio`.
 
 DDL base en `db/schema.sql`:
 
@@ -349,10 +349,15 @@ CREATE TABLE `leads` (
 
 CREATE TABLE `cotizaciones` (
   `id` varchar(36) NOT NULL,
+  `folio` int unsigned NOT NULL AUTO_INCREMENT,  -- identificador visible FL-001…; añadido en schema-v2
   `empresa_id` int(11) NOT NULL,
   `lead_id` varchar(36) DEFAULT NULL,
   `usuario_id` varchar(36) DEFAULT NULL,
   `tipo_activo` varchar(50) NOT NULL,
+  `nombre_activo` varchar(200) DEFAULT NULL,     -- descripción libre del bien; añadido en schema-v2
+  `marca` varchar(100) DEFAULT NULL,             -- solo tipo Automotriz; añadido en schema-v2
+  `modelo` varchar(100) DEFAULT NULL,            -- solo tipo Automotriz; añadido en schema-v2
+  `anio` int DEFAULT NULL,                       -- solo tipo Automotriz; añadido en schema-v2
   `valor_activo` decimal(12,2) NOT NULL,
   `plazo` int(11) NOT NULL,
   `tipo_renta` varchar(20) NOT NULL,
@@ -362,7 +367,8 @@ CREATE TABLE `cotizaciones` (
   `renta_mensual_sin_iva` decimal(12,2) NOT NULL,
   `renta_mensual_con_iva` decimal(12,2) NOT NULL,
   `fecha_creacion` timestamp NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `folio` (`folio`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -414,10 +420,11 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 
 | Método | Endpoint | Roles | Aislamiento por empresa |
 | ------ | -------- | ----- | ----------------------- |
-| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `etapas_alcanzadas` (IDs de etapas con timestamp) |
+| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `etapas_alcanzadas` (IDs de etapas con timestamp) y datos de la cotización vinculada (`cotizacion_id`, `cotizacion_folio`, `cotizacion_marca`, etc.) |
 | POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario; registra timestamp de etapa inicial |
 | PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead) |
 | PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa`; mueve en el embudo y aplica reglas de `lead_etapas_historial` |
+| PUT | `/leads/:lead_id/vincular-cotizacion` | Ninguna (pública) | Desvincula cualquier cotización previa del lead y asigna la nueva; la cotización debe estar libre (`lead_id IS NULL`) |
 | GET | `/estatus-leads/:empresa_id` | mismos | Catálogo por empresa; semilla `activo` / `cancelado` |
 | POST | `/estatus-leads` | `super_admin`, `admin_empresa` | Alta de estatus personalizado |
 | PUT | `/estatus-leads/:id` | mismos | Renombrar / color / flags (sistema: reglas fijas) |
@@ -447,7 +454,7 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 | Archivo | Uso |
 | ------- | --- |
 | `db/schema.sql` | Instalación nueva: esquema base completo. **No modificar.** |
-| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Aplicar sobre BD existente después de `schema.sql`. Incluye canales jerárquicos, catálogo raíz, estatus de prospectos, trazabilidad de etapas y datos iniciales. |
+| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Aplicar sobre BD existente después de `schema.sql`. Incluye canales jerárquicos, catálogo raíz, estatus de prospectos, trazabilidad de etapas, datos iniciales y columnas del cotizador (`folio`, `nombre_activo`, `marca`, `modelo`, `anio`). |
 | `db/migrations/README.md` | Instrucciones y tabla de registro `_crm_migraciones`. |
 
 ```bash
@@ -463,6 +470,7 @@ mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
 | `leads.medio` | Normalización única a `Contacto directo` (no se repite si ya consta en `_crm_migraciones`) |
 | `lead_estatus` | Tabla + semilla `activo` / `cancelado` por empresa; asigna `estatus_id` según `activo` histórico |
 | `lead_etapas_historial` | Tabla con `UNIQUE (lead_id, stage_id)` y `alcanzado_at`; sin backfill en leads existentes |
+| `cotizaciones` | `folio` (INT AUTO_INCREMENT, clave UNIQUE), `nombre_activo`, `marca`, `modelo`, `anio` |
 
 **Complemento en runtime:** `lib/canales.js` (semilla al crear empresa), `lib/estatus-leads.js` (catálogo de estatus en `GET` de leads/estatus) y `lib/lead-etapas-historial.js` (timestamps al crear lead y al mover de etapa).
 
@@ -483,12 +491,13 @@ Los subcanales y estatus personalizados se gestionan desde el front tras la migr
 
 Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer cotizaciones según estos contratos; el filtrado por `rol`/`usuario_id` en listados depende de query params enviados por el cliente.
 
-| Método | Endpoint |
-| ------ | -------- |
-| POST | `/cotizaciones` |
-| GET | `/cotizaciones/lead/:lead_id` |
-| GET | `/cotizaciones/empresa/:empresa_id` |
-| PUT | `/cotizaciones/:id/vincular-lead` |
+| Método | Endpoint | Notas |
+| ------ | -------- | ----- |
+| POST | `/cotizaciones` | Crea cotización; acepta `folio` (AUTO_INCREMENT), `nombre_activo`, `marca`, `modelo`, `anio` además de los campos financieros |
+| GET | `/cotizaciones/lead/:lead_id` | Historial de cotizaciones de un lead |
+| GET | `/cotizaciones/empresa/:empresa_id` | Listado por empresa; filtra por `usuario_id` si `rol=agente` en query |
+| GET | `/cotizaciones/buscar/:empresa_id` | Busca cotizaciones **sin lead asignado** (`lead_id IS NULL`); query param `termino` filtra por folio, nombre o tipo de activo. Usado por el buscador inteligente del Kanban |
+| PUT | `/cotizaciones/:id/vincular-lead` | Vincula una cotización a un lead por su ID |
 
 ### Dashboard
 

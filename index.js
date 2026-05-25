@@ -70,6 +70,26 @@ const valorEstimadoValido = (valor) => {
     return Number.isFinite(n) && n > 0;
 };
 
+const sincronizarValorLeadDesdeCotizacion = async (db, leadId, cotizacionId) => {
+    const [filas] = await db.query(
+        'SELECT valor_activo FROM cotizaciones WHERE id = ? LIMIT 1',
+        [cotizacionId],
+    );
+    if (!filas.length || filas[0].valor_activo == null) return;
+    await db.query('UPDATE leads SET valor = ? WHERE id = ?', [filas[0].valor_activo, leadId]);
+};
+
+const obtenerValorActivoCotizacionLead = async (db, leadId) => {
+    const [filas] = await db.query(
+        `SELECT valor_activo FROM cotizaciones
+         WHERE lead_id = ?
+         ORDER BY folio DESC
+         LIMIT 1`,
+        [leadId],
+    );
+    return filas.length ? filas[0].valor_activo : null;
+};
+
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
 
 
@@ -672,10 +692,16 @@ const SQL_LEADS_CON_ESTATUS = `
     LEFT JOIN lead_estatus e ON l.estatus_id = e.id
 `;
 
-app.get('/api/leads/:empresa_id', (req, res) => {
+app.get('/api/leads/:empresa_id', async (req, res) => {
     const { empresa_id } = req.params;
-    
-    // Consulta actualizada para traer ABSOLUTAMENTE TODOS los datos de la cotización
+
+    try {
+        await asegurarCatalogoEstatus(pool, empresa_id);
+    } catch (errSeed) {
+        console.error('❌ Error al sembrar estatus (leads):', errSeed.message);
+        return res.status(500).json({ error: 'No se pudo inicializar estatus de prospectos.' });
+    }
+
     const query = `
         SELECT 
             l.*, 
@@ -686,7 +712,7 @@ app.get('/api/leads/:empresa_id', (req, res) => {
             e.incluir_en_suma as estatus_incluir_en_suma,
             u.nombre as agente_nombre,
             
-            -- DATOS COMPLETOS DE LA COTIZACIÓN
+            -- DATOS COMPLETOS DE LA COTIZACIÓN (última vinculada al lead)
             c.id as cotizacion_id,
             c.folio as cotizacion_folio,
             c.tipo_activo as cotizacion_tipo_activo,
@@ -706,7 +732,12 @@ app.get('/api/leads/:empresa_id', (req, res) => {
         FROM leads l
         LEFT JOIN lead_estatus e ON l.estatus_id = e.id
         LEFT JOIN usuarios u ON l.usuario_id = u.id
-        LEFT JOIN cotizaciones c ON c.lead_id = l.id
+        LEFT JOIN cotizaciones c ON c.id = (
+            SELECT c2.id FROM cotizaciones c2
+            WHERE c2.lead_id = l.id
+            ORDER BY c2.folio DESC
+            LIMIT 1
+        )
         WHERE l.empresa_id = ?
         ORDER BY l.created_at DESC
     `;
@@ -791,7 +822,10 @@ app.put('/api/leads/:id',
             return res.status(400).json({ error: 'No se puede editar un lead cancelado.' });
         }
 
-        if (!valorEstimadoValido(valor)) {
+        const valorCotizacion = await obtenerValorActivoCotizacionLead(db, id);
+        const valorAGuardar = valorCotizacion != null ? valorCotizacion : valor;
+
+        if (valorCotizacion == null && !valorEstimadoValido(valor)) {
             return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
         }
 
@@ -817,7 +851,7 @@ app.put('/api/leads/:id',
                  SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?,
                      estatus_id = ?, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP
                  WHERE id = ?`,
-                [nombre, correo, telefono, valor, medio, usuario_id, estatusObjetivo.id, motivo, id],
+                [nombre, correo, telefono, valorAGuardar, medio, usuario_id, estatusObjetivo.id, motivo, id],
             );
             return res.status(200).json({ mensaje: 'Lead cancelado con éxito' });
         }
@@ -826,7 +860,7 @@ app.put('/api/leads/:id',
             `UPDATE leads
              SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?, estatus_id = ?
              WHERE id = ?`,
-            [nombre, correo, telefono, valor, medio, usuario_id, estatusObjetivo.id, id],
+            [nombre, correo, telefono, valorAGuardar, medio, usuario_id, estatusObjetivo.id, id],
         );
         res.status(200).json({ mensaje: 'Lead actualizado con éxito' });
     } catch (error) {
@@ -865,23 +899,20 @@ app.get('/api/cotizaciones/buscar/:empresa_id', (req, res) => {
 
 
 // Asignar o reasignar una cotización a un Lead
-app.put('/api/leads/:lead_id/vincular-cotizacion', (req, res) => {
+app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
     const { lead_id } = req.params;
     const { cotizacion_id } = req.body;
-    
-    // Primero, "desasignamos" cualquier cotización que ya tuviera este lead
-    const queryLimpiar = `UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?`;
-    
-    pool.query(queryLimpiar, [lead_id], (err) => {
-        if (err) return res.status(500).json({ error: "Error limpiando cotizaciones previas" });
-        
-        // Ahora asignamos la nueva cotización
-        const queryAsignar = `UPDATE cotizaciones SET lead_id = ? WHERE id = ?`;
-        pool.query(queryAsignar, [lead_id, cotizacion_id], (error) => {
-            if (error) return res.status(500).json({ error: "Error vinculando la cotización" });
-            res.json({ mensaje: "Cotización asignada con éxito" });
-        });
-    });
+    const db = pool.promise();
+
+    try {
+        await db.query('UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?', [lead_id]);
+        await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [lead_id, cotizacion_id]);
+        await sincronizarValorLeadDesdeCotizacion(db, lead_id, cotizacion_id);
+        res.json({ mensaje: 'Cotización asignada con éxito' });
+    } catch (error) {
+        console.error('❌ Error vinculando cotización al lead:', error.message);
+        res.status(500).json({ error: error.message || 'Error vinculando la cotización' });
+    }
 });
 
 
@@ -1149,11 +1180,23 @@ app.post('/api/cotizaciones', (req, res) => {
         valor_activo, plazo, tipo_renta, 
         porcentaje_vr, vr_calculado, pago_inicial, 
         renta_mensual_sin_iva, renta_mensual_con_iva
-    ], (error) => {
+    ], async (error) => {
         if (error) {
             console.error("❌ ERROR AL GUARDAR COTIZACIÓN:", error.sqlMessage || error);
             return res.status(500).json({ error: error.sqlMessage || "Error al guardar en BD" });
         }
+
+        if (lead_id && valorEstimadoValido(valor_activo)) {
+            try {
+                await pool.promise().query(
+                    'UPDATE leads SET valor = ? WHERE id = ?',
+                    [valor_activo, lead_id],
+                );
+            } catch (syncErr) {
+                console.error('❌ Error sincronizando valor del lead:', syncErr.message);
+            }
+        }
+
         res.status(201).json({ mensaje: "✅ Cotización guardada con éxito", id: nuevaCotizacionId });
     });
 });
@@ -1202,14 +1245,19 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
 });
 
 // 4. Vincular una cotización existente a un prospecto
-app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
+app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
     const { id } = req.params;
     const { lead_id } = req.body;
-    
-    pool.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [lead_id, id], (error) => {
-        if (error) return res.status(500).json({ error: error.message });
-        res.status(200).json({ mensaje: "✅ Cotización vinculada al prospecto" });
-    });
+    const db = pool.promise();
+
+    try {
+        await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [lead_id, id]);
+        await sincronizarValorLeadDesdeCotizacion(db, lead_id, id);
+        res.status(200).json({ mensaje: '✅ Cotización vinculada al prospecto' });
+    } catch (error) {
+        console.error('❌ Error vinculando cotización al prospecto:', error.message);
+        res.status(500).json({ error: error.message || 'Error al vincular cotización' });
+    }
 });
 
 

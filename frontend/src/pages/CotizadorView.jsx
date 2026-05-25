@@ -257,7 +257,7 @@ const CotizadorView = () => {
             nombre: formData.nombre_cliente,
             correo: '', 
             telefono: '',
-            valor: parseFloat(formData.valorActivo) || 0,
+            valor: parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0,
             medio: 'Cotizador',
             stage_id: primeraEtapaId,
             usuario_id: usuarioLogueado.id

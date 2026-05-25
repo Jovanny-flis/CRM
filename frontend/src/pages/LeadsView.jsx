@@ -3,11 +3,19 @@ import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 
+const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
 
 const valorEstimadoValido = (valor) => {
   const n = parseFloat(valor);
   return Number.isFinite(n) && n > 0;
+};
+
+const valorMostrableLead = (lead) => {
+  if (lead.cotizacion_id && lead.cotizacion_valor_activo != null) {
+    return parseFloat(lead.cotizacion_valor_activo);
+  }
+  return parseFloat(lead.valor || 0);
 };
 
 function LeadsView() {
@@ -47,6 +55,7 @@ function LeadsView() {
     usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : ''
   );
   const [filtroEstatusIds, setFiltroEstatusIds] = useState([]);
+  const [modoFiltroEstatus, setModoFiltroEstatus] = useState('predeterminado');
   const [menuEstatusAbierto, setMenuEstatusAbierto] = useState(false);
   const [motivoDesactivacion, setMotivoDesactivacion] = useState('');
   const [mostrarAvisoCancelacion, setMostrarAvisoCancelacion] = useState(false);
@@ -167,7 +176,9 @@ function LeadsView() {
       nombre: leadCompleto.nombre || '',
       correo: leadCompleto.correo || '',
       telefono: leadCompleto.telefono || '',
-      valor: leadCompleto.valor || '',
+      valor: leadCompleto.cotizacion_id
+        ? (leadCompleto.cotizacion_valor_activo ?? leadCompleto.valor ?? '')
+        : (leadCompleto.valor || ''),
       medio: leadCompleto.medio || '',
       usuario_id: leadCompleto.usuario_id || '',
       estatus_id: leadCompleto.estatus_id || ''
@@ -196,15 +207,54 @@ function LeadsView() {
   };
 
   const toggleFiltroEstatus = (id) => {
-    setFiltroEstatusIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setModoFiltroEstatus('seleccion');
+    setFiltroEstatusIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      if (next.length === 0) {
+        setModoFiltroEstatus('predeterminado');
+      }
+      return next;
+    });
+  };
+
+  const seleccionarTodosLosEstatus = () => {
+    setModoFiltroEstatus('todos');
+    setFiltroEstatusIds([]);
+    setMenuEstatusAbierto(false);
+  };
+
+  const seleccionarVistaPredeterminada = () => {
+    setModoFiltroEstatus('predeterminado');
+    setFiltroEstatusIds([]);
+    setMenuEstatusAbierto(false);
+  };
+
+  const codigoEstatusLead = (lead) => lead.estatus_codigo || CODIGO_ACTIVO;
+
+  const leadCoincideConFiltroEstatus = (lead) => {
+    const codigoLead = codigoEstatusLead(lead);
+    const idLead = lead.estatus_id != null ? String(lead.estatus_id) : null;
+
+    if (modoFiltroEstatus === 'todos') return true;
+
+    if (modoFiltroEstatus === 'predeterminado') {
+      return codigoLead !== CODIGO_CANCELADO;
+    }
+
+    return filtroEstatusIds.some((idFiltro) => {
+      if (idLead && String(idFiltro) === idLead) return true;
+      const est = estatusList.find((e) => String(e.id) === String(idFiltro));
+      return est?.codigo === codigoLead;
+    });
   };
 
   const etiquetaFiltroEstatus = () => {
-    if (filtroEstatusIds.length === 0) return 'Todos los estatus';
+    if (modoFiltroEstatus === 'todos') return 'Todos los estatus';
+    if (modoFiltroEstatus === 'predeterminado' || filtroEstatusIds.length === 0) {
+      return 'Vista predeterminada';
+    }
     if (filtroEstatusIds.length === 1) {
-      return estatusList.find((e) => e.id === filtroEstatusIds[0])?.nombre || '1 estatus';
+      return estatusList.find((e) => String(e.id) === String(filtroEstatusIds[0]))?.nombre || '1 estatus';
     }
     return `${filtroEstatusIds.length} estatus`;
   };
@@ -256,12 +306,15 @@ function LeadsView() {
     e.preventDefault();
     if (modoSoloLectura) return;
 
-    if (!valorEstimadoValido(formData.valor)) {
+    const tieneCotizacion = Boolean(leadEditando?.cotizacion_id);
+    const valorNumerico = tieneCotizacion
+      ? parseFloat(leadEditando.cotizacion_valor_activo ?? formData.valor)
+      : parseFloat(formData.valor);
+
+    if (!tieneCotizacion && !valorEstimadoValido(formData.valor)) {
       alert('El valor estimado es obligatorio y debe ser mayor a cero.');
       return;
     }
-
-    const valorNumerico = parseFloat(formData.valor);
     const agenteAsignado = usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : formData.usuario_id;
     
     if (leadEditando) {
@@ -323,8 +376,7 @@ function LeadsView() {
     return leads.filter(lead => {
       const esDeLaEtapa = lead.stage_id === stageId;
       const esDelAgente = filtroAgente === '' || lead.usuario_id === filtroAgente;
-      const cumpleFiltroEstatus =
-        filtroEstatusIds.length === 0 || filtroEstatusIds.includes(lead.estatus_id);
+      const cumpleFiltroEstatus = leadCoincideConFiltroEstatus(lead);
 
       return esDeLaEtapa && esDelAgente && cumpleFiltroEstatus;
     });
@@ -508,16 +560,26 @@ function LeadsView() {
               <div className="absolute z-20 right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-100 py-1 max-h-72 overflow-y-auto">
                 <button
                   type="button"
-                  onClick={() => { setFiltroEstatusIds([]); setMenuEstatusAbierto(false); }}
+                  onClick={seleccionarVistaPredeterminada}
                   className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                    filtroEstatusIds.length === 0 ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                    modoFiltroEstatus === 'predeterminado' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Vista predeterminada
+                  {modoFiltroEstatus === 'predeterminado' && <Check size={14} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={seleccionarTodosLosEstatus}
+                  className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
+                    modoFiltroEstatus === 'todos' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Todos los estatus
-                  {filtroEstatusIds.length === 0 && <Check size={14} />}
+                  {modoFiltroEstatus === 'todos' && <Check size={14} />}
                 </button>
                 {estatusList.map((est) => {
-                  const sel = filtroEstatusIds.includes(est.id);
+                  const sel = modoFiltroEstatus === 'seleccion' && filtroEstatusIds.includes(est.id);
                   return (
                     <button
                       key={est.id}
@@ -566,7 +628,7 @@ function LeadsView() {
           const leadsFiltrados = obtenerLeadsPorEtapaId(etapa.id);
           const sumaTotal = leadsFiltrados.reduce((total, lead) => {
             if (!incluyeEnSuma(lead)) return total;
-            return total + parseFloat(lead.valor || 0);
+            return total + valorMostrableLead(lead);
           }, 0);
 
           return (
@@ -639,35 +701,34 @@ function LeadsView() {
                       )}
                     </div>
 
-                    {/* ETIQUETA FOLIO COTIZACIÓN EN LA TARJETA */}
-                    {lead.cotizacion_folio && (
-                      <span className={`absolute top-3 right-3 text-[9px] font-black tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none text-white bg-[#ea5533] shadow-sm ${editable ? 'group-hover:opacity-0' : ''}`}>
-                        FL-{String(lead.cotizacion_folio).padStart(3, '0')}
-                      </span>
-                    )}
-                    
-                    {!lead.cotizacion_folio && (
-                      <span className={`absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none ${
+                    {/* BADGES ESQUINA SUPERIOR DERECHA: folio arriba, estatus abajo */}
+                    <div className={`absolute top-3 right-3 flex flex-col items-end gap-1 z-10 pointer-events-none ${editable ? 'group-hover:opacity-0' : ''}`}>
+                      {lead.cotizacion_folio && (
+                        <span className="text-[9px] font-black tracking-wider px-2 py-0.5 rounded text-white bg-[#ea5533] shadow-sm">
+                          FL-{String(lead.cotizacion_folio).padStart(3, '0')}
+                        </span>
+                      )}
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
                         cancelado
                           ? 'text-slate-500 bg-slate-200'
                           : 'text-slate-600 bg-white/90 border border-slate-200'
-                      } ${editable ? 'group-hover:opacity-0' : ''}`}>
+                      }`}>
                         {lead.estatus_nombre || '—'}
                       </span>
-                    )}
+                    </div>
 
                     <div className={`flex justify-between items-start mb-1 pr-14`}>
                       <p className={`font-bold text-sm truncate ${cancelado ? 'text-slate-500' : 'text-slate-900'}`}>{lead.nombre || "Sin nombre"}</p>
                     </div>
 
                     <div className="mb-2">
-                      {parseFloat(lead.valor) > 0 && (
+                      {valorMostrableLead(lead) > 0 && (
                         <span className={`font-bold text-[11px] px-2 py-0.5 rounded-md border whitespace-nowrap inline-block mb-1 ${
                           incluyeEnSuma(lead)
                             ? 'text-green-700 bg-green-50 border-green-200'
                             : 'text-slate-500 bg-slate-200 border-slate-300'
                         }`}>
-                          {formatoMoneda(lead.valor)}
+                          {formatoMoneda(valorMostrableLead(lead))}
                         </span>
                       )}
                       <p className={`text-[11px] truncate ${cancelado ? 'text-slate-400' : 'text-slate-500'}`}>{lead.correo || 'Sin correo'}</p>
@@ -784,13 +845,15 @@ function LeadsView() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>Valor Estimado ($) *</label>
+                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>
+                          {leadEditando?.cotizacion_id ? 'Valor del activo (cotización)' : 'Valor Estimado ($) *'}
+                        </label>
                         <input 
                           type="number" required min="0.01" step="0.01" 
                           value={formData.valor} 
                           onChange={(e) => setFormData({...formData, valor: e.target.value})} 
-                          disabled={modoSoloLectura}
-                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
+                          disabled={modoSoloLectura || Boolean(leadEditando?.cotizacion_id)}
+                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura || leadEditando?.cotizacion_id ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
                           placeholder="Ej. 15000" 
                         />
                       </div>
