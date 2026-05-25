@@ -157,7 +157,7 @@ function LeadsView() {
   const incluyeEnSuma = (lead) => lead.estatus_incluir_en_suma === 1 || lead.estatus_incluir_en_suma === true;
 
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
-  const vaACancelarEnFormulario = formData.estatus_id && formData.estatus_id === estatusCanceladoId;
+  const vaACancelarEnFormulario = formData.estatus_id && String(formData.estatus_id) === String(estatusCanceladoId);
 
   const abrirModalEditar = (leadCompleto) => {
     if (!esLeadEditable(leadCompleto)) return;
@@ -192,9 +192,11 @@ function LeadsView() {
 
   const handleCambioEstatus = (nuevoEstatusId) => {
     if (modoSoloLectura) return;
-    const nuevo = estatusList.find((e) => e.id === nuevoEstatusId);
+    const nuevo = estatusList.find((e) => String(e.id) === String(nuevoEstatusId));
     if (nuevo?.codigo === CODIGO_CANCELADO && estatusOriginalCodigo !== CODIGO_CANCELADO) {
       setMostrarAvisoCancelacion(true);
+    } else {
+      setMostrarAvisoCancelacion(false);
     }
     if (nuevo?.codigo !== CODIGO_CANCELADO) {
       setMotivoDesactivacion('');
@@ -1120,6 +1122,23 @@ function LeadsView() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {mostrarAvisoCancelacion && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+            <p className="text-slate-800 font-semibold text-lg leading-relaxed">
+              Si guardas con estatus cancelado, este lead no podrá cambiar de estatus, de etapa, ni editarse de nuevo.
+            </p>
+            <button
+              type="button"
+              onClick={confirmarAvisoCancelacion}
+              className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+            >
+              OK
+            </button>
           </div>
         </div>
       )}
