@@ -604,7 +604,7 @@ const CotizadorView = () => {
           He leído y entiendo plenamente las condiciones y disposiciones contenidas en la presente cotización, estoy de acuerdo.
         </p>
         <p style="margin: 5px 0 0 0;">
-          <strong>${formData.nombre_cliente || 'A quien corresponda'}</strong>&nbsp;&nbsp;
+          <strong>${formData.nombre_cliente || 'A quien corresponda'}</strong>.&nbsp;&nbsp;
           Metepec, Edo. de México, a ${fechaHoy}
         </p>
         <p style="margin: 6px 0 0 0; font-size: 9px; color: #555;">
