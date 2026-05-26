@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
+import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
@@ -44,6 +45,7 @@ function LeadsView() {
     telefono: '', 
     valor: '', 
     medio: '',
+    tipo_persona: '',
     usuario_id: '',
     estatus_id: ''
   });
@@ -142,7 +144,7 @@ function LeadsView() {
     setIsModalOpen(false);
     setLeadEditando(null);
     setModoSoloLectura(false);
-    setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', usuario_id: '', estatus_id: '' });
+    setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', tipo_persona: '', usuario_id: '', estatus_id: '' });
     setMotivoDesactivacion('');
     setMostrarAvisoCancelacion(false);
     setEstatusOriginalCodigo('activo');
@@ -180,6 +182,7 @@ function LeadsView() {
         ? (leadCompleto.cotizacion_valor_activo ?? leadCompleto.valor ?? '')
         : (leadCompleto.valor || ''),
       medio: leadCompleto.medio || '',
+      tipo_persona: leadCompleto.tipo_persona || '',
       usuario_id: leadCompleto.usuario_id || '',
       estatus_id: leadCompleto.estatus_id || ''
     });
@@ -331,6 +334,7 @@ function LeadsView() {
         telefono: formData.telefono,
         valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
+        tipo_persona: formData.tipo_persona || null,
         usuario_id: agenteAsignado,
         estatus_id: formData.estatus_id
       };
@@ -358,6 +362,7 @@ function LeadsView() {
         telefono: formData.telefono,
         valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
+        tipo_persona: formData.tipo_persona || null,
         stage_id: primeraEtapaId,
         usuario_id: agenteAsignado
       };
@@ -703,11 +708,16 @@ function LeadsView() {
                       )}
                     </div>
 
-                    {/* BADGES ESQUINA SUPERIOR DERECHA: folio arriba, estatus abajo */}
+                    {/* BADGES ESQUINA SUPERIOR DERECHA: folio arriba, tipo persona, estatus abajo */}
                     <div className={`absolute top-3 right-3 flex flex-col items-end gap-1 z-10 pointer-events-none ${editable ? 'group-hover:opacity-0' : ''}`}>
                       {lead.cotizacion_folio && (
                         <span className="text-[9px] font-black tracking-wider px-2 py-0.5 rounded text-white bg-[#ea5533] shadow-sm">
                           FL-{String(lead.cotizacion_folio).padStart(3, '0')}
+                        </span>
+                      )}
+                      {lead.tipo_persona && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded text-slate-600 bg-white/90 border border-slate-200">
+                          {lead.tipo_persona}
                         </span>
                       )}
                       <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
@@ -818,6 +828,20 @@ function LeadsView() {
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
                         placeholder="Ej. Juan Pérez" 
                       />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de persona</label>
+                      <select
+                        value={formData.tipo_persona}
+                        onChange={(e) => setFormData({ ...formData, tipo_persona: e.target.value })}
+                        disabled={modoSoloLectura}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800"
+                      >
+                        {OPCIONES_TIPO_PERSONA.map((op) => (
+                          <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
+                        ))}
+                      </select>
                     </div>
                     
                     <div className="grid grid-cols-2 gap-4">

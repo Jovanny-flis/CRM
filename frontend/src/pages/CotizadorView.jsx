@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
+import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 
 /** A4 @ 96dpi — dimensiones fijas para PDF consistente entre navegadores */
 const PDF_ANCHO_PX = 794;
@@ -99,7 +100,8 @@ const CotizadorView = () => {
 
   const [formData, setFormData] = useState({
     lead_id: '', 
-    nombre_cliente: '', 
+    nombre_cliente: '',
+    tipo_persona: '',
     tipoArrendamiento: 'Automotriz', 
     tipoVehiculo: 'Sedan',
     nombreActivo: '', 
@@ -154,8 +156,29 @@ const CotizadorView = () => {
     setFormData(prev => ({ 
       ...prev, 
       lead_id: id, 
-      nombre_cliente: leadSel ? leadSel.nombre : '' 
+      nombre_cliente: leadSel ? leadSel.nombre : '',
+      tipo_persona: leadSel ? (leadSel.tipo_persona || '') : '',
     }));
+  };
+
+  const sincronizarTipoPersonaLead = async (leadId) => {
+    const leadRef = leads.find(l => l.id === leadId);
+    if (!leadRef) return;
+
+    const tipoForm = formData.tipo_persona || null;
+    const tipoLead = leadRef.tipo_persona || null;
+    if (String(tipoForm || '') === String(tipoLead || '')) return;
+
+    await api.put(`/leads/${leadId}`, {
+      nombre: leadRef.nombre,
+      correo: leadRef.correo || '',
+      telefono: leadRef.telefono || '',
+      valor: leadRef.valor,
+      medio: leadRef.medio || '',
+      usuario_id: leadRef.usuario_id,
+      estatus_id: leadRef.estatus_id,
+      tipo_persona: tipoForm,
+    });
   };
 
   useEffect(() => {
@@ -259,6 +282,7 @@ const CotizadorView = () => {
             telefono: '',
             valor: parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0,
             medio: 'Cotizador',
+            tipo_persona: formData.tipo_persona || null,
             stage_id: primeraEtapaId,
             usuario_id: usuarioLogueado.id
           });
@@ -289,6 +313,11 @@ const CotizadorView = () => {
         renta_mensual_sin_iva: res.rentaMensualSubtotal, 
         renta_mensual_con_iva: res.rentaMensualTotal
       });
+
+      if (finalLeadId && formData.lead_id) {
+        await sincronizarTipoPersonaLead(finalLeadId);
+        cargarLeads();
+      }
 
       alert("✅ Cotización guardada con éxito.");
       cargarHistorial(); 
@@ -688,6 +717,21 @@ const CotizadorView = () => {
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
                 placeholder="Obligatorio para guardar" 
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                Tipo de persona
+              </label>
+              <select
+                value={formData.tipo_persona}
+                onChange={e => setFormData({ ...formData, tipo_persona: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
+              >
+                {OPCIONES_TIPO_PERSONA.map((op) => (
+                  <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
+                ))}
+              </select>
             </div>
 
             <div>

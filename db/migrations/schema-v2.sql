@@ -15,6 +15,7 @@
 --   • Semilla activo/cancelado y asignación estatus_id en leads existentes
 --   • lead_etapas_historial (timestamps por etapa alcanzada hacia adelante)
 --   • cotizaciones: folio (AUTO_INCREMENT), nombre_activo, marca, modelo, anio
+--   • leads: tipo_persona (PM | PF | PFAE, opcional)
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
 --   • lib/canales.js — catálogo raíz al crear empresa (POST /empresas); no re-sembrar en GET /medios
@@ -278,6 +279,12 @@ CALL crm_add_column_if_missing('cotizaciones', 'modelo',
   "VARCHAR(100) NULL AFTER `marca`");
 CALL crm_add_column_if_missing('cotizaciones', 'anio',
   "INT NULL AFTER `modelo`");
+
+-- -----------------------------------------------------------------------------
+-- 9) leads — tipo de persona del prospecto (opcional)
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('leads', 'tipo_persona',
+  "VARCHAR(4) NULL DEFAULT NULL COMMENT 'PM | PF | PFAE' AFTER `medio`");
 
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)

@@ -27,6 +27,7 @@ const {
     esCancelado,
 } = require('./lib/estatus-leads');
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
+const { normalizarTipoPersona } = require('./lib/leads');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -753,7 +754,7 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
 
 // Crear un nuevo prospecto (Lead)
 app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), async (req, res) => {
-    const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id } = req.body;
+    const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id, tipo_persona } = req.body;
 
     if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
         return res.status(403).json({ error: 'No puedes crear leads en otra empresa.' });
@@ -761,6 +762,11 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
 
     if (!valorEstimadoValido(valor)) {
         return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
+    }
+
+    const tipoPersonaNormalizado = normalizarTipoPersona(tipo_persona);
+    if (tipoPersonaNormalizado && typeof tipoPersonaNormalizado === 'object' && tipoPersonaNormalizado.error) {
+        return res.status(400).json({ error: tipoPersonaNormalizado.error });
     }
 
     try {
@@ -773,8 +779,8 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
         const db = pool.promise();
 
         await db.query(
-            `INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, estatus_id, stage_id, usuario_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, tipo_persona, estatus_id, stage_id, usuario_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 leadId,
                 empresa_id,
@@ -783,6 +789,7 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
                 telefono,
                 valor,
                 medio,
+                tipoPersonaNormalizado,
                 estatusInicial.id,
                 stage_id || null,
                 usuario_id || null,
@@ -807,7 +814,7 @@ app.put('/api/leads/:id',
     validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
     async (req, res) => {
     const { id } = req.params;
-    const { nombre, correo, telefono, valor, medio, usuario_id, estatus_id, motivo_desactivacion } = req.body;
+    const { nombre, correo, telefono, valor, medio, usuario_id, estatus_id, motivo_desactivacion, tipo_persona } = req.body;
     const db = pool.promise();
 
     try {
@@ -820,6 +827,13 @@ app.put('/api/leads/:id',
         const leadActual = filasLead[0];
         if (esCancelado(leadActual)) {
             return res.status(400).json({ error: 'No se puede editar un lead cancelado.' });
+        }
+
+        const tipoPersonaNormalizado = normalizarTipoPersona(
+            tipo_persona !== undefined ? tipo_persona : leadActual.tipo_persona,
+        );
+        if (tipoPersonaNormalizado && typeof tipoPersonaNormalizado === 'object' && tipoPersonaNormalizado.error) {
+            return res.status(400).json({ error: tipoPersonaNormalizado.error });
         }
 
         const valorCotizacion = await obtenerValorActivoCotizacionLead(db, id);
@@ -848,19 +862,19 @@ app.put('/api/leads/:id',
             }
             await db.query(
                 `UPDATE leads
-                 SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?,
+                 SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, tipo_persona = ?, usuario_id = ?,
                      estatus_id = ?, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP
                  WHERE id = ?`,
-                [nombre, correo, telefono, valorAGuardar, medio, usuario_id, estatusObjetivo.id, motivo, id],
+                [nombre, correo, telefono, valorAGuardar, medio, tipoPersonaNormalizado, usuario_id, estatusObjetivo.id, motivo, id],
             );
             return res.status(200).json({ mensaje: 'Lead cancelado con éxito' });
         }
 
         await db.query(
             `UPDATE leads
-             SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?, estatus_id = ?
+             SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, tipo_persona = ?, usuario_id = ?, estatus_id = ?
              WHERE id = ?`,
-            [nombre, correo, telefono, valorAGuardar, medio, usuario_id, estatusObjetivo.id, id],
+            [nombre, correo, telefono, valorAGuardar, medio, tipoPersonaNormalizado, usuario_id, estatusObjetivo.id, id],
         );
         res.status(200).json({ mensaje: 'Lead actualizado con éxito' });
     } catch (error) {
