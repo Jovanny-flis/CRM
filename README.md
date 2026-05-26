@@ -15,9 +15,9 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Empresas           | CRUD de empresas (alcance `super_admin` en API). |
 | Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa. |
 | Pipelines y etapas | Embudos y etapas por empresa. |
-| Leads              | Prospectos, canales (`lead_sources`), estatus configurables (`lead_estatus`), tablero Kanban con drag & drop, confirmación al avanzar de etapa, trazabilidad temporal por etapa (`lead_etapas_historial`) y cancelación con motivo. |
+| Leads              | Prospectos, canales (`lead_sources`), estatus configurables (`lead_estatus`), **tipo de persona** opcional (`tipo_persona`: `PM`, `PF`, `PFAE`) en alta/edición y badge en el tablero Kanban, tablero con drag & drop, confirmación al avanzar de etapa, trazabilidad temporal por etapa (`lead_etapas_historial`) y cancelación con motivo. |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). |
-| Cotizador          | Cálculo de arrendamiento y guardado de cotizaciones con folio secuencial (FL-001…). Soporta tipo **Automotriz** con campos `marca`, `modelo` y `año`. Las cotizaciones pueden vincularse a un lead desde el tablero Kanban; el lead muestra el detalle de la cotización asignada en su modal. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
+| Cotizador          | Cálculo de arrendamiento y guardado de cotizaciones con folio secuencial (FL-001…). Soporta tipo **Automotriz** con campos obligatorios `marca`, `modelo`, `version` y `año` (el `nombre_activo` guardado y el PDF usan el formato `marca - modelo - version - año`); tipo **Otro** exige `nombre_activo`. Los botones **Guardar DB** y **Generar PDF** permanecen deshabilitados hasta completar todos los campos obligatorios y la cotización sin errores de cálculo. Las cotizaciones pueden vincularse a un lead desde el tablero Kanban; el lead muestra el detalle de la cotización asignada en su modal (incluye versión cuando existe). Al cotizar se puede indicar o heredar `tipo_persona` del prospecto vinculado. El **módulo cotizador en producto es público en la API**: los endpoints bajo `/api/cotizaciones` no exigen `Authorization`. La UI del cotizador en la SPA está detrás del flujo de login como el resto de pantalla principal (ver Roles y permisos). |
 
 ---
 
@@ -92,7 +92,8 @@ CRM/
 ├── lib/
 │   ├── canales.js
 │   ├── estatus-leads.js
-│   └── lead-etapas-historial.js
+│   ├── lead-etapas-historial.js
+│   └── leads.js
 ├── eslint.config.mjs
 ├── firebase.js
 ├── index.js
@@ -127,6 +128,8 @@ CRM/
         │   ├── AdminEstatusLeads.jsx
         │   ├── SelectorCanales.jsx
         │   └── Sidebar.jsx
+        ├── constants/
+        │   └── tipoPersona.js
         ├── layouts/
         │   └── DashboardLayout.jsx
         └── pages/
@@ -174,7 +177,7 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 
 6. Crear la base ejecutando `db/schema.sql` en el servidor SQL (crea `flising_crm` y tablas).
 
-7. Si la BD ya existía o es instalación que debe incluir canales jerárquicos, estatus de prospectos y trazabilidad de etapas, aplicar la migración unificada (segura de re-ejecutar):
+7. Si la BD ya existía o es instalación que debe incluir canales jerárquicos, estatus de prospectos, trazabilidad de etapas, `tipo_persona` en leads y columnas del cotizador (`version`, etc.), aplicar la migración unificada (segura de re-ejecutar):
    ```bash
    mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
    ```
@@ -243,7 +246,7 @@ Relaciones principales:
 - `leads` (0..1) → (N) `cotizaciones`
 - `clientes_globales` (0..1) → (N) `leads` vía `cliente_global_id`
 
-**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa; tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`; en `cotizaciones`: `folio` (AUTO_INCREMENT, identificador visible FL-001…), `nombre_activo`, `marca`, `modelo`, `anio`.
+**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `tipo_persona` (`PM` | `PF` | `PFAE`, opcional), `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa; tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`; en `cotizaciones`: `folio` (AUTO_INCREMENT, identificador visible FL-001…), `nombre_activo`, `marca`, `modelo`, `version`, `anio`.
 
 DDL base en `db/schema.sql`:
 
@@ -357,6 +360,7 @@ CREATE TABLE `cotizaciones` (
   `nombre_activo` varchar(200) DEFAULT NULL,     -- descripción libre del bien; añadido en schema-v2
   `marca` varchar(100) DEFAULT NULL,             -- solo tipo Automotriz; añadido en schema-v2
   `modelo` varchar(100) DEFAULT NULL,            -- solo tipo Automotriz; añadido en schema-v2
+  `version` varchar(100) DEFAULT NULL,           -- solo tipo Automotriz; añadido en schema-v2
   `anio` int DEFAULT NULL,                       -- solo tipo Automotriz; añadido en schema-v2
   `valor_activo` decimal(12,2) NOT NULL,
   `plazo` int(11) NOT NULL,
@@ -420,9 +424,9 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 
 | Método | Endpoint | Roles | Aislamiento por empresa |
 | ------ | -------- | ----- | ----------------------- |
-| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `etapas_alcanzadas` (IDs de etapas con timestamp) y datos de la cotización vinculada (`cotizacion_id`, `cotizacion_folio`, `cotizacion_marca`, etc.) |
-| POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario; registra timestamp de etapa inicial |
-| PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead) |
+| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `tipo_persona`, `etapas_alcanzadas` (IDs de etapas con timestamp) y datos de la cotización vinculada (`cotizacion_id`, `cotizacion_folio`, `cotizacion_marca`, `cotizacion_modelo`, `cotizacion_version`, `cotizacion_anio`, etc.) |
+| POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario; acepta `tipo_persona` opcional (`PM`, `PF`, `PFAE`); registra timestamp de etapa inicial |
+| PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead); acepta `tipo_persona` opcional |
 | PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa`; mueve en el embudo y aplica reglas de `lead_etapas_historial` |
 | PUT | `/leads/:lead_id/vincular-cotizacion` | Ninguna (pública) | Desvincula cualquier cotización previa del lead y asigna la nueva; la cotización debe estar libre (`lead_id IS NULL`) |
 | GET | `/estatus-leads/:empresa_id` | mismos | Catálogo por empresa; semilla `activo` / `cancelado` |
@@ -454,7 +458,7 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 | Archivo | Uso |
 | ------- | --- |
 | `db/schema.sql` | Instalación nueva: esquema base completo. **No modificar.** |
-| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Aplicar sobre BD existente después de `schema.sql`. Incluye canales jerárquicos, catálogo raíz, estatus de prospectos, trazabilidad de etapas, datos iniciales y columnas del cotizador (`folio`, `nombre_activo`, `marca`, `modelo`, `anio`). |
+| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Aplicar sobre BD existente después de `schema.sql`. Incluye canales jerárquicos, catálogo raíz, estatus de prospectos, trazabilidad de etapas, datos iniciales y columnas del cotizador (`folio`, `nombre_activo`, `marca`, `modelo`, `version`, `anio`) y de leads (`tipo_persona`). |
 | `db/migrations/README.md` | Instrucciones y tabla de registro `_crm_migraciones`. |
 
 ```bash
@@ -465,14 +469,20 @@ mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
 
 | Bloque | Detalle |
 | ------ | ------- |
-| `leads` | `activo` (legado), `motivo_desactivacion`, `desactivado_at`, `estatus_id` |
+| `leads` | `activo` (legado), `motivo_desactivacion`, `desactivado_at`, `estatus_id`, `tipo_persona` |
 | `lead_sources` | `parent_id` + FK; limpieza de raíces no estándar e inserción del catálogo de 9 canales por empresa |
 | `leads.medio` | Normalización única a `Contacto directo` (no se repite si ya consta en `_crm_migraciones`) |
 | `lead_estatus` | Tabla + semilla `activo` / `cancelado` por empresa; asigna `estatus_id` según `activo` histórico |
 | `lead_etapas_historial` | Tabla con `UNIQUE (lead_id, stage_id)` y `alcanzado_at`; sin backfill en leads existentes |
-| `cotizaciones` | `folio` (INT AUTO_INCREMENT, clave UNIQUE), `nombre_activo`, `marca`, `modelo`, `anio` |
+| `cotizaciones` | `folio` (INT AUTO_INCREMENT, clave UNIQUE), `nombre_activo`, `marca`, `modelo`, `version`, `anio` |
 
-**Complemento en runtime:** `lib/canales.js` (semilla al crear empresa), `lib/estatus-leads.js` (catálogo de estatus en `GET` de leads/estatus) y `lib/lead-etapas-historial.js` (timestamps al crear lead y al mover de etapa).
+**Complemento en runtime:** `lib/canales.js` (semilla al crear empresa), `lib/estatus-leads.js` (catálogo de estatus en `GET` de leads/estatus), `lib/lead-etapas-historial.js` (timestamps al crear lead y al mover de etapa) y `lib/leads.js` (normalización de `tipo_persona` en alta/edición de prospectos).
+
+**Tipo de persona del prospecto (`leads.tipo_persona`):**
+
+- Valores permitidos: `PM` (persona moral), `PF` (persona física), `PFAE` (persona física con actividad empresarial). Campo **opcional**; leads existentes quedan en `NULL` hasta que un operador lo indique.
+- Captura en alta/edición de prospectos (`LeadsView.jsx`), en el cotizador al crear o vincular un lead (`CotizadorView.jsx`) y constantes compartidas en `frontend/src/constants/tipoPersona.js`.
+- En el tablero Kanban se muestra un badge con la abreviatura (entre el folio de cotización y el estatus del lead) solo cuando tiene valor.
 
 **Estatus de prospectos:** catálogo por empresa en Pipelines (sección bajo el embudo, componente `AdminEstatusLeads.jsx`). Sistema: `activo` (inicial, suma, mueve) y `cancelado` (oculto en suma, bloqueado, motivo obligatorio). Los personalizados definen color, suma y movilidad. La app usa `estatus_id`; no el booleano `activo`.
 
@@ -493,11 +503,18 @@ Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer co
 
 | Método | Endpoint | Notas |
 | ------ | -------- | ----- |
-| POST | `/cotizaciones` | Crea cotización; acepta `folio` (AUTO_INCREMENT), `nombre_activo`, `marca`, `modelo`, `anio` además de los campos financieros |
+| POST | `/cotizaciones` | Crea cotización; acepta `folio` (AUTO_INCREMENT), `nombre_activo`, `marca`, `modelo`, `version`, `anio` además de los campos financieros. En automotriz el front persiste `nombre_activo` como `marca - modelo - version - año` |
 | GET | `/cotizaciones/lead/:lead_id` | Historial de cotizaciones de un lead |
 | GET | `/cotizaciones/empresa/:empresa_id` | Listado por empresa; filtra por `usuario_id` si `rol=agente` en query |
 | GET | `/cotizaciones/buscar/:empresa_id` | Busca cotizaciones **sin lead asignado** (`lead_id IS NULL`); query param `termino` filtra por folio, nombre o tipo de activo. Usado por el buscador inteligente del Kanban |
 | PUT | `/cotizaciones/:id/vincular-lead` | Vincula una cotización a un lead por su ID |
+
+**Campos del activo y validación en UI (`CotizadorView.jsx`):**
+
+- **Automotriz:** obligatorios en front `marca`, `modelo`, `version` y `año`; también nombre del cliente y valor del activo. Validación solo en frontend (sin rechazo en API por campos vacíos).
+- **Otro:** obligatorio `nombre_activo` (descripción libre del bien).
+- **Guardar DB** / **Generar PDF:** deshabilitados hasta que no haya errores de cálculo (tasa, plazo, residual, etc.) y todos los campos obligatorios del tipo de arrendamiento estén completos; los inputs mantienen estilo neutro (sin resaltado rojo).
+- Cotizaciones automotrices anteriores al campo `version` conservan `NULL` en BD hasta rehacerse; el detalle en leads muestra versión cuando existe.
 
 ### Dashboard
 

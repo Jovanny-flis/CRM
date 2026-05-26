@@ -8,6 +8,28 @@ const PDF_ANCHO_PX = 794;
 const PDF_ALTO_A4_PX = 1122;
 const PDF_ESCALA_CANVAS = 2;
 
+/** Automotriz: marca - modelo - version - año */
+const armarNombreActivoAutomotriz = ({ marca, modelo, version, anio }) =>
+  [marca, modelo, version, anio]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' - ');
+
+const camposActivoCompletos = (data) => {
+  if (data.tipoArrendamiento === 'Automotriz') {
+    return ['marca', 'modelo', 'version', 'anio'].every((k) => String(data[k] || '').trim() !== '');
+  }
+  return String(data.nombreActivo || '').trim() !== '';
+};
+
+const cotizacionListaParaAccion = (data, erroresCalculo) => {
+  if (Object.keys(erroresCalculo).length > 0) return false;
+  if (!String(data.nombre_cliente || '').trim()) return false;
+  const valor = parseFloat(String(data.valorActivo || '').replace(/,/g, ''));
+  if (!valor || valor <= 0) return false;
+  return camposActivoCompletos(data);
+};
+
 const esperarRecursosPdf = (elemento) => {
   const promesas = [];
   if (document.fonts?.ready) promesas.push(document.fonts.ready);
@@ -106,7 +128,8 @@ const CotizadorView = () => {
     tipoVehiculo: 'Sedan',
     nombreActivo: '', 
     marca: '', 
-    modelo: '', 
+    modelo: '',
+    version: '',
     anio: '', 
     valorActivo: '', 
     plazo: '36', 
@@ -127,6 +150,8 @@ const CotizadorView = () => {
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
+
+  const puedeGuardarOPdf = cotizacionListaParaAccion(formData, errores);
 
   const cargarHistorial = () => {
     api.get(`/cotizaciones/empresa/${empresaId}?usuario_id=${usuarioLogueado.id}&rol=${usuarioLogueado.rol}`)
@@ -253,14 +278,13 @@ const CotizadorView = () => {
   }, [formData]);
 
   const handleGuardarCotizacion = async () => {
-    if (Object.keys(errores).length > 0 || !formData.valorActivo) return alert("Corrige los errores antes de guardar.");
-    if (!formData.nombre_cliente) return alert("Escribe el nombre del cliente para poder guardar la cotización.");
+    if (!puedeGuardarOPdf) return;
 
     setGuardando(true);
     let finalLeadId = formData.lead_id || null;
 
-    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
-      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
+      ? armarNombreActivoAutomotriz(formData)
       : formData.nombreActivo.trim();
 
     try {
@@ -301,6 +325,7 @@ const CotizadorView = () => {
         tipo_activo: formData.tipoArrendamiento === 'Automotriz' ? formData.tipoVehiculo : formData.tipoArrendamiento,
         marca: formData.tipoArrendamiento === 'Automotriz' ? formData.marca : '',
         modelo: formData.tipoArrendamiento === 'Automotriz' ? formData.modelo : '',
+        version: formData.tipoArrendamiento === 'Automotriz' ? formData.version : '',
         anio: formData.tipoArrendamiento === 'Automotriz' ? formData.anio : '',
         nombre_activo: nombreCombinado,
         // MODIFICADO: Guardar sin comas en la BD
@@ -367,15 +392,13 @@ const CotizadorView = () => {
   };
 
   const imprimirPDF = async () => {
-    if (Object.keys(errores).length > 0 || !formData.valorActivo)
-      return alert("Completa la cotización sin errores.");
-    if (generandoPdf) return;
+    if (!puedeGuardarOPdf || generandoPdf) return;
 
     setGenerandoPdf(true);
     let wrapper = null;
 
-    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
-      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
+      ? armarNombreActivoAutomotriz(formData)
       : formData.nombreActivo.trim();
 
     const fechaHoy = new Date().toLocaleDateString('es-MX', {
@@ -671,7 +694,7 @@ const CotizadorView = () => {
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
         <button 
-          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', anio:'', nombreActivo:''})} 
+          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', version:'', anio:'', nombreActivo:''})} 
           className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
         >
           Limpiar Campos
@@ -769,7 +792,7 @@ const CotizadorView = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                    Marca
+                    Marca *
                   </label>
                   <input 
                     type="text" 
@@ -782,10 +805,10 @@ const CotizadorView = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                    Modelo
+                    Modelo *
                   </label>
                   <input 
-                    type="text" 
+                    type="text"
                     value={formData.modelo} 
                     onChange={e => setFormData({...formData, modelo: e.target.value})} 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
@@ -795,10 +818,23 @@ const CotizadorView = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                    Año
+                    Versión *
                   </label>
                   <input 
-                    type="text" 
+                    type="text"
+                    value={formData.version} 
+                    onChange={e => setFormData({...formData, version: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. Sense"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Año *
+                  </label>
+                  <input 
+                    type="text"
                     value={formData.anio} 
                     onChange={e => setFormData({...formData, anio: e.target.value})} 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
@@ -809,10 +845,10 @@ const CotizadorView = () => {
             ) : (
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                  Nombre del activo
+                  Nombre del activo *
                 </label>
                 <input 
-                  type="text" 
+                  type="text"
                   value={formData.nombreActivo} 
                   onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
@@ -1018,15 +1054,15 @@ const CotizadorView = () => {
           <div className="flex gap-3">
             <button 
               onClick={handleGuardarCotizacion} 
-              disabled={guardando || Object.keys(errores).length > 0} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || Object.keys(errores).length > 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
+              disabled={guardando || !puedeGuardarOPdf} 
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || !puedeGuardarOPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
             >
               {guardando ? 'Guardando...' : '💾 Guardar DB'}
             </button>
             <button 
               onClick={imprimirPDF} 
-              disabled={Object.keys(errores).length > 0 || generandoPdf} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${Object.keys(errores).length > 0 || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
+              disabled={!puedeGuardarOPdf || generandoPdf} 
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGuardarOPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
             >
               {generandoPdf ? 'Generando PDF…' : '📄 Generar PDF'}
             </button>

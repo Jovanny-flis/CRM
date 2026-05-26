@@ -1009,8 +1009,8 @@ function LeadsView() {
                           </div>
 
                           {/* Fila 2: Detalles Vehiculares (Si existen) */}
-                          {(leadEditando.cotizacion_marca || leadEditando.cotizacion_modelo || leadEditando.cotizacion_anio) && (
-                            <div className="grid grid-cols-3 gap-2">
+                          {(leadEditando.cotizacion_marca || leadEditando.cotizacion_modelo || leadEditando.cotizacion_version || leadEditando.cotizacion_anio) && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Marca</div>
                                 <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_marca}>{leadEditando.cotizacion_marca || '-'}</div>
@@ -1018,6 +1018,10 @@ function LeadsView() {
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Modelo</div>
                                 <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_modelo}>{leadEditando.cotizacion_modelo || '-'}</div>
+                              </div>
+                              <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
+                                <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Versión</div>
+                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_version}>{leadEditando.cotizacion_version || '-'}</div>
                               </div>
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Año</div>

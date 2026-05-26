@@ -14,7 +14,7 @@
 --   • lead_estatus + leads.estatus_id (estatus de prospectos)
 --   • Semilla activo/cancelado y asignación estatus_id en leads existentes
 --   • lead_etapas_historial (timestamps por etapa alcanzada hacia adelante)
---   • cotizaciones: folio (AUTO_INCREMENT), nombre_activo, marca, modelo, anio
+--   • cotizaciones: folio (AUTO_INCREMENT), nombre_activo, marca, modelo, version, anio
 --   • leads: tipo_persona (PM | PF | PFAE, opcional)
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
@@ -277,8 +277,10 @@ CALL crm_add_column_if_missing('cotizaciones', 'marca',
   "VARCHAR(100) NULL AFTER `nombre_activo`");
 CALL crm_add_column_if_missing('cotizaciones', 'modelo',
   "VARCHAR(100) NULL AFTER `marca`");
+CALL crm_add_column_if_missing('cotizaciones', 'version',
+  "VARCHAR(100) NULL COMMENT 'Versión del vehículo (automotriz)' AFTER `modelo`");
 CALL crm_add_column_if_missing('cotizaciones', 'anio',
-  "INT NULL AFTER `modelo`");
+  "INT NULL AFTER `version`");
 
 -- -----------------------------------------------------------------------------
 -- 9) leads — tipo de persona del prospecto (opcional)

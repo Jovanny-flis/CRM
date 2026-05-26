@@ -719,7 +719,8 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             c.tipo_activo as cotizacion_tipo_activo,
             c.nombre_activo as cotizacion_activo,
             c.marca as cotizacion_marca, 
-            c.modelo as cotizacion_modelo, 
+            c.modelo as cotizacion_modelo,
+            c.version as cotizacion_version,
             c.anio as cotizacion_anio,
             c.valor_activo as cotizacion_valor_activo,
             c.plazo as cotizacion_plazo,
@@ -1174,7 +1175,7 @@ app.post('/api/cotizaciones', (req, res) => {
     const {
         empresa_id, lead_id, usuario_id, 
         tipo_activo, // <-- Sigue funcionando normal
-        marca, modelo, anio, nombre_activo, // <-- AQUÍ ENTRAN TUS 3 CAMPOS + EL COMBINADO
+        marca, modelo, version, anio, nombre_activo,
         valor_activo, plazo, tipo_renta, 
         porcentaje_vr, vr_calculado, pago_inicial, 
         renta_mensual_sin_iva, renta_mensual_con_iva
@@ -1184,13 +1185,13 @@ app.post('/api/cotizaciones', (req, res) => {
 
     const query = `
         INSERT INTO cotizaciones 
-        (id, empresa_id, lead_id, usuario_id, tipo_activo, marca, modelo, anio, nombre_activo, valor_activo, plazo, tipo_renta, porcentaje_vr, vr_calculado, pago_inicial, renta_mensual_sin_iva, renta_mensual_con_iva) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, empresa_id, lead_id, usuario_id, tipo_activo, marca, modelo, version, anio, nombre_activo, valor_activo, plazo, tipo_renta, porcentaje_vr, vr_calculado, pago_inicial, renta_mensual_sin_iva, renta_mensual_con_iva) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     pool.query(query, [
         nuevaCotizacionId, empresa_id, lead_id || null, usuario_id || null, 
-        tipo_activo, marca, modelo, anio, nombre_activo, // <-- AQUÍ SE GUARDAN LOS NUEVOS DATOS
+        tipo_activo, marca, modelo, version, anio, nombre_activo,
         valor_activo, plazo, tipo_renta, 
         porcentaje_vr, vr_calculado, pago_inicial, 
         renta_mensual_sin_iva, renta_mensual_con_iva
