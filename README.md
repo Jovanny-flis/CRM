@@ -11,7 +11,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 
 | Módulo             | Descripción |
 | ------------------ | ----------- |
-| Autenticación      | Inicio de sesión con correo y contraseña vía Firebase; trazo del perfil CRM con `POST /api/login/firebase`. Recuperación de contraseña desde el login mediante `sendPasswordResetEmail` de Firebase. |
+| Autenticación      | Inicio de sesión con correo y contraseña vía Firebase; trazo del perfil CRM con `POST /api/login/firebase`. Recuperación de contraseña desde el login mediante `sendPasswordResetEmail` de Firebase. **Sesión en la SPA:** expiración por inactividad (20 min), aviso 2 min antes, una sola pestaña activa por usuario y mensajes en el login (ver [Gestión de sesión](#gestión-de-sesión-frontend)). |
 | Empresas           | CRUD de empresas (alcance `super_admin` en API). |
 | Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa. |
 | Pipelines y etapas | Embudos y etapas por empresa. |
@@ -59,7 +59,8 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  Navegador — React + Vite (frontend/)                       │
-│  Rutas protegidas por rol en App.jsx; token Firebase en API │
+│  Rutas por rol; token Firebase en API; timeout inactividad  │
+│  y una sola pestaña (lib/sesion.js, useGestionSesion)       │
 └────────────────────────────┬────────────────────────────────┘
                              │ HTTPS/HTTP — Axios (VITE_API_URL)
                              │ Authorization: Bearer <idToken> en rutas protegidas
@@ -126,11 +127,16 @@ CRM/
         ├── main.jsx
         ├── components/
         │   ├── AdminEstatusLeads.jsx
+        │   ├── AvisoSesionModal.jsx
         │   ├── SelectorCanales.jsx
         │   └── Sidebar.jsx
         ├── constants/
         │   └── tipoPersona.js
+        ├── hooks/
+        │   └── useGestionSesion.js
         ├── layouts/
+        ├── lib/
+        │   └── sesion.js
         │   └── DashboardLayout.jsx
         └── pages/
             ├── AgentesView.jsx
@@ -541,6 +547,38 @@ Endpoints que reciben `empresa_id` en el body (`POST /api/leads`, `POST /api/pip
 
 **Frontend:** `App.jsx` envuelve rutas en `RutaProtegida` según `usuario.rol`. `Sidebar.jsx` filtra ítems de menú por rol. Tras el login, el perfil se guarda en `localStorage` bajo `usuarioCRM` para hidratar UI y parámetros de consulta; las peticiones autenticadas añaden `Authorization: Bearer` con el token de Firebase vía interceptor en `api.js`. **Estas restricciones de UI son meramente cosméticas**: la autoridad real está en el backend.
 
+### Gestión de sesión (frontend)
+
+La política de sesión aplica **solo a la SPA del CRM** (`frontend/`). No hay timeout de inactividad en el backend: `verificarToken` sigue validando el Firebase ID token en cada petición protegida mientras el cliente lo envíe.
+
+| Regla | Comportamiento |
+| ----- | -------------- |
+| Inactividad | Tras **20 minutos** sin actividad del usuario, cierre forzado: `signOut` de Firebase y borrado de `usuarioCRM` en `localStorage`. |
+| Aviso previo | A los **18 minutos** (2 min antes del cierre) se muestra `AvisoSesionModal` con cuenta regresiva y botón **Seguir conectado**, que reinicia el temporizador. |
+| Qué cuenta como actividad | Eventos estándar en ventana: `mousedown`, `mousemove`, `keydown`, `scroll`, `touchstart`, `click` (con throttle de 1 s para no reiniciar en exceso). |
+| Una sola pestaña | Coordinación vía `localStorage` (`crm_pestana_activa`) y `sessionStorage` (`crm_tab_id`). La pestaña que carga o recupera el foco **toma el control**; las demás reciben el evento `storage` y cierran sesión. Al cerrar la pestaña activa se libera el bloqueo (`beforeunload`). |
+| Cierre manual | El botón del sidebar usa `cerrarSesion()` en `lib/sesion.js` (misma rutina centralizada). |
+| Mensajes en login | Tras expirar por inactividad o por abrir otra pestaña, `LoginView` muestra un aviso en ámbar (textos en `MENSAJES_LOGIN` dentro de `lib/sesion.js`). |
+
+**Archivos implicados**
+
+| Archivo | Rol |
+| ------- | --- |
+| `frontend/src/lib/sesion.js` | Constantes de tiempo, bloqueo de pestaña, `cerrarSesion()`, mensajes de login |
+| `frontend/src/hooks/useGestionSesion.js` | Temporizadores de inactividad, latido de pestaña, listeners de actividad y `storage` |
+| `frontend/src/components/AvisoSesionModal.jsx` | Modal de aviso 2 minutos antes del cierre |
+| `frontend/src/App.jsx` | Activa el hook cuando hay usuario autenticado |
+| `frontend/src/pages/LoginView.jsx` | Consume y muestra el mensaje post-cierre |
+
+Los tiempos están fijos en código (`TIEMPO_INACTIVIDAD_MS` y `AVISO_PREVIO_MS` en `sesion.js`), no en variables de entorno.
+
+**Prueba local acelerada:** para validar sin esperar 20 minutos, reducir temporalmente en `sesion.js` (revertir antes de commit):
+
+```javascript
+export const TIEMPO_INACTIVIDAD_MS = 2 * 60 * 1000;
+export const AVISO_PREVIO_MS = 30 * 1000;
+```
+
 **Cotizador:** Los endpoints REST del cotizador no requieren autenticación (módulo público en API por decisión de producto). La aplicación web sigue mostrando el cotizador solo a usuarios que hayan iniciado sesión en la SPA, pero la API no refuerza el mismo límite en esas rutas.
 
 ---
@@ -550,6 +588,7 @@ Endpoints que reciben `empresa_id` en el body (`POST /api/leads`, `POST /api/pip
 | Área | Problema |
 | ---- | -------- |
 | Autorización Firebase | No se usan custom claims en el token; el rol y `empresa_id` se leen de la BD en `verificarToken` (una sola query reutilizada por la cadena). Optimización pendiente, no es un riesgo de seguridad. |
+| Sesión por inactividad | El timeout de 20 minutos y la pestaña única se aplican solo en el frontend; la API no invalida tokens por idle. Si se requiere enforcement en servidor, haría falta registro de última actividad por usuario. |
 | Arquitectura backend | Toda la API en `index.js` sin capas separadas (rutas/controladores/servicios). |
 | Calidad | ESLint con múltiples errores en `frontend/` y en `index.js`. |
 | Calidad | Sin tests automatizados en scripts del repo. |

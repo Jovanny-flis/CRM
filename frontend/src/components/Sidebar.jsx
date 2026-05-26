@@ -1,12 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { cerrarSesion, CLAVE_USUARIO, obtenerTabId } from '../lib/sesion';
 
 const Sidebar = () => {
   const location = useLocation();
 
   // 1. Recuperamos al usuario que inició sesión desde la memoria del navegador
-  const usuarioGuardado = localStorage.getItem('usuarioCRM');
+  const usuarioGuardado = localStorage.getItem(CLAVE_USUARIO);
   const usuario = usuarioGuardado ? JSON.parse(usuarioGuardado) : { nombre: 'Cargando...', rol: 'agente' };
 
   // 2. Definimos las reglas: ¡Ahora con las 4 jerarquías reales!
@@ -54,9 +53,8 @@ const Sidebar = () => {
   const menuPermitido = menuItems.filter(item => item.roles.includes(usuario.rol));
 
   // 4. Función para cerrar sesión con un clic
-  const cerrarSesion = async () => {
-    await signOut(auth);
-    localStorage.removeItem('usuarioCRM');
+  const manejarCerrarSesion = async () => {
+    await cerrarSesion({ razon: 'manual', tabId: obtenerTabId() });
     window.location.replace('/');
   };
 
@@ -96,7 +94,7 @@ const Sidebar = () => {
 
         {/* El nuevo botón de Cerrar Sesión */}
         <button 
-          onClick={cerrarSesion}
+          onClick={manejarCerrarSesion}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 rounded-xl transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
