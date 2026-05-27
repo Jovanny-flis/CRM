@@ -1,6 +1,25 @@
 /** Tipos de vehículo cuando tipo_arrendamiento = Automotriz (coincide con tipo_activo guardado) */
 export const TIPOS_VEHICULO = ['Sedan', 'SUV', 'Camionetas', 'Lujo', 'Tractocamion', 'Autobus'];
 
+/** Variante de PNG en public/cotizacion-activos/ para la banda gris del PDF. */
+export const VARIANTE_IMAGEN_ACTIVO_PDF = 'blanco'; // 'naranja' | 'blanco'
+
+const SLUG_IMAGEN_ACTIVO_PDF = {
+  Sedan: 'sedan',
+  SUV: 'suv',
+  Camionetas: 'camionetas',
+  Lujo: 'lujo',
+  Tractocamion: 'tractocamion',
+  Autobus: 'autobus',
+  Otro: 'otro',
+};
+
+export const archivoImagenActivoPdf = ({ tipoArrendamiento, tipoVehiculo }) => {
+  const tipo = tipoArrendamiento === 'Automotriz' ? tipoVehiculo : 'Otro';
+  const slug = SLUG_IMAGEN_ACTIVO_PDF[tipo] || SLUG_IMAGEN_ACTIVO_PDF.Sedan;
+  return `${slug}_${VARIANTE_IMAGEN_ACTIVO_PDF}.png`;
+};
+
 /** GPS y trámites solo aplican en arrendamiento Automotriz. */
 export const limpiarCamposSoloAutomotriz = () => ({
   gps: '',

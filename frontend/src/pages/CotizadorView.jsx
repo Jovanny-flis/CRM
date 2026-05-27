@@ -11,6 +11,7 @@ import {
   formDataCotizadorVacio,
   formatMontoEnFormulario,
   limpiarCamposSoloAutomotriz,
+  archivoImagenActivoPdf,
 } from '../lib/cotizacionFormulario';
 import {
   crearLeadOportunidad,
@@ -409,29 +410,39 @@ const CotizadorView = () => {
       day: '2-digit', month: 'long', year: 'numeric'
     });
     const logoUrl = `${window.location.origin}/branding/flising-logo-blanco.png`;
+    const imagenActivoUrl = `${window.location.origin}/cotizacion-activos/${archivoImagenActivoPdf(formData)}`;
+    const etiquetaImagenActivo = formData.tipoArrendamiento === 'Automotriz'
+      ? formData.tipoVehiculo
+      : 'Otro';
 
     const htmlContent = `
     <div style="font-family: 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif; font-size: 10px; background: white; width: ${PDF_ANCHO_PX}px; min-height: ${PDF_ALTO_A4_PX}px; margin: 0; padding: 0; display: flex; flex-direction: column; box-sizing: border-box;">
 
-      <!-- BANDA SUPERIOR GRIS: sin border-radius, ocupa todo el ancho -->
-      <div style="background-color: #2c2c2c; padding: 5px 24px 20px 24px; margin: 0;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+      <!-- BANDA SUPERIOR GRIS: logo + texto izquierda; activo derecha (misma altura de imágenes) -->
+      <div style="background-color: #2c2c2c; padding: 5px 24px 12px 24px; margin: 0;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+          <div style="color: white; flex: 1; min-width: 0;">
+            <img
+              src="${logoUrl}"
+              alt="Flising"
+              style="height: 110px; object-fit: contain; display: block; margin-bottom: 2px;"
+              onerror="this.style.display='none'"
+            />
+            <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">COTIZACIÓN</div>
+            <div style="color: #cccccc; font-size: 10px; line-height: 1.8;">
+              <div><strong style="color: white;">Fecha de expedición</strong>&nbsp;&nbsp;${fechaHoy}</div>
+            </div>
+            <div style="font-size: 10px; color: #cccccc; line-height: 1.5; margin-top: 4px;">
+              Agradecemos tu confianza en Flising, es un gusto atenderte.<br/>
+              A continuación, te presentamos los detalles específicos de tu cotización solicitada.
+            </div>
+          </div>
           <img
-            src="${logoUrl}"
-            alt="Flising"
-            style="height: 110px; object-fit: contain;"
+            src="${imagenActivoUrl}"
+            alt="${etiquetaImagenActivo}"
+            style="height: 200px; max-width: 270px; object-fit: contain; flex-shrink: 0;"
             onerror="this.style.display='none'"
           />
-          <div style="text-align: right; color: #cccccc; font-size: 10px; line-height: 1.8;">
-            <div><strong style="color: white;">Fecha de expedición</strong>&nbsp;&nbsp;${fechaHoy}</div>
-          </div>
-        </div>
-        <div style="color: white;">
-          <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">COTIZACIÓN</div>
-          <div style="font-size: 10px; color: #cccccc; line-height: 1.5;">
-            Agradecemos tu confianza en Flising, es un gusto atenderte.<br/>
-            A continuación, te presentamos los detalles específicos de tu cotización solicitada.
-          </div>
         </div>
       </div>
 
@@ -459,7 +470,7 @@ const CotizadorView = () => {
       </div>
 
       <!-- TABLAS DE PAGO INICIAL Y RENTA MENSUAL -->
-      <div style="padding: 14px 24px; background: white;">
+      <div style="padding: 14px 24px 2px 24px; background: white;">
         <table style="width: 100%; border-collapse: collapse;">
           <tr style="vertical-align: top;">
 
@@ -583,19 +594,20 @@ const CotizadorView = () => {
       <div style="padding: 0px 24px 8px 24px; background: white; font-size: 9.5px; color: #333; line-height: 1.5;">
         <p style="font-weight: 700; margin: 6px 0 3px 0;">OBSERVACIONES</p>
         <ul style="margin: 0; padding-left: 14px;">
-          <li>- Sujeto a aprobación de crédito.</li>
-          <li>- Cotización sujeta a cambios sin previo aviso.</li>
-          <li>- Seguro y GPS obligatorio a cargo del cliente con renovaciones anuales (en caso de aplicar) cobertura amplia.</li>
-          <li>- El valor de la tenencia y/o impuestos gubernamentales es estimado, sujeto a la fórmula gubernamental vigente y a la fecha de entrega de la unidad.</li>
-          <li>- Sujeto a disponibilidad del activo en sus variantes y/o colores, así como su valor.</li>
+          <li> Sujeto a aprobación de crédito.</li>
+          <li> Cotización sujeta a cambios sin previo aviso.</li>
+          <li> Seguro y GPS obligatorio a cargo del cliente con renovaciones anuales (en caso de aplicar) cobertura amplia.</li>
+          <li> El valor de la tenencia y/o impuestos gubernamentales es estimado, sujeto a la fórmula gubernamental vigente y a la fecha de entrega de la unidad.</li>
+          <li> Sujeto a disponibilidad del activo en sus variantes y/o colores, así como su valor.</li>
         </ul>
         <p style="font-weight: 700; margin: 8px 0 3px 0;">NOTAS</p>
         <ul style="margin: 0; padding-left: 14px;">
-          <li>- Oferta preliminar sujeta a modificación según evaluación crediticia. Las condiciones definitivas se establecerán después de concluir satisfactoriamente el proceso de precalificación.</li>
-          <li>- Al pago inicial se le suma el pago del seguro anual una vez que se confirme el precio de este o en caso de ser financiado, la parte que corresponda.</li>
-          <li>- 1er renta deberá ser pagada antes o a la entrega del bien arrendado.</li>
-          <li>- El Arrendatario pagará las rentas proporcionales que se generen entre el día de entrega del vehículo y la fecha de inicio del arrendamiento.</li>
-          <li>- El pago mensual es domiciliado el día 1 de cada mes.</li>
+          <li> Oferta preliminar sujeta a modificación según evaluación crediticia. Las condiciones definitivas se establecerán después de concluir satisfactoriamente el proceso de precalificación.</li>
+          <li> Al pago inicial se le suma el pago del seguro anual una vez que se confirme el precio de este o en caso de ser financiado, la parte que corresponda.</li>
+          <li> 1er renta deberá ser pagada antes o a la entrega del bien arrendado.</li>
+          <li> El Arrendatario pagará las rentas proporcionales que se generen entre el día de entrega del vehículo y la fecha de inicio del arrendamiento.</li>
+          <li> El pago mensual es domiciliado el día 1 de cada mes.</li>
+          <li> La arrendadora se reserva el derecho de adquirir los activos objeto del arrendamiento con el proveedor, distribuidor o canal comercial que más convenga a sus intereses, condiciones operativas y financieras.</li>
         </ul>
       </div>
 
