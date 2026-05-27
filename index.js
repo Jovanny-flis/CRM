@@ -81,6 +81,13 @@ const sincronizarValorLeadDesdeCotizacion = async (db, leadId, cotizacionId) => 
     await db.query('UPDATE leads SET valor = ? WHERE id = ?', [filas[0].valor_activo, leadId]);
 };
 
+/** Un solo folio activo por lead; las demás cotizaciones del mismo lead quedan sin vincular. */
+const activarCotizacionEnLead = async (db, leadId, cotizacionId) => {
+    await db.query('UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?', [leadId]);
+    await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [leadId, cotizacionId]);
+    await sincronizarValorLeadDesdeCotizacion(db, leadId, cotizacionId);
+};
+
 const obtenerValorActivoCotizacionLead = async (db, leadId) => {
     const [filas] = await db.query(
         `SELECT valor_activo FROM cotizaciones
@@ -921,9 +928,7 @@ app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
     const db = pool.promise();
 
     try {
-        await db.query('UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?', [lead_id]);
-        await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [lead_id, cotizacion_id]);
-        await sincronizarValorLeadDesdeCotizacion(db, lead_id, cotizacion_id);
+        await activarCotizacionEnLead(db, lead_id, cotizacion_id);
         res.json({ mensaje: 'Cotización asignada con éxito' });
     } catch (error) {
         console.error('❌ Error vinculando cotización al lead:', error.message);
@@ -1180,14 +1185,12 @@ app.post('/api/cotizaciones', async (req, res) => {
     try {
         const { modo } = await guardarCotizacion(pool, nuevaCotizacionId, datos);
 
-        if (lead_id && valorEstimadoValido(valor_activo)) {
+        if (lead_id) {
             try {
-                await pool.promise().query(
-                    'UPDATE leads SET valor = ? WHERE id = ?',
-                    [valor_activo, lead_id],
-                );
+                const db = pool.promise();
+                await activarCotizacionEnLead(db, lead_id, nuevaCotizacionId);
             } catch (syncErr) {
-                console.error('❌ Error sincronizando valor del lead:', syncErr.message);
+                console.error('❌ Error activando cotización en el lead:', syncErr.message);
             }
         }
 
@@ -1264,8 +1267,7 @@ app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
     const db = pool.promise();
 
     try {
-        await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [lead_id, id]);
-        await sincronizarValorLeadDesdeCotizacion(db, lead_id, id);
+        await activarCotizacionEnLead(db, lead_id, id);
         res.status(200).json({ mensaje: '✅ Cotización vinculada al prospecto' });
     } catch (error) {
         console.error('❌ Error vinculando cotización al prospecto:', error.message);

@@ -547,8 +547,10 @@ Al cambiar el select de **Automotriz → Otro**, el front limpia marca/modelo/ve
 **Guardar y prospecto:**
 
 - **Guardar DB** / **Generar PDF:** deshabilitados si hay errores de cálculo o faltan obligatorios.
-- Sin prospecto seleccionado, confirmación opcional para crear lead (`POST /api/leads`); el `id` devuelto se usa en `POST /cotizaciones`.
-- **Hacer Prospecto** (historial, solo filas sin lead): crea lead y **vincula la misma** cotización existente (`PUT vincular-lead`) — distinto de replicar.
+- **Guardar DB** abre un modal: solo cotización, **nueva oportunidad** (lead nuevo, aunque repita el nombre) o **vincular a oportunidad existente**. El select del formulario solo copia nombre/tipo de persona; no vincula al guardar.
+- **Un folio activo por lead:** al vincular (`PUT vincular-lead` o `PUT …/vincular-cotizacion`) las demás cotizaciones de ese lead quedan sin `lead_id`.
+- **Historial:** menú ⋮ por fila — replicar, nueva oportunidad o vincular a existente (misma lógica que el modal al guardar).
+- **Replicar** deja nombre y prospecto vacíos; el operador asigna el cliente y decide el destino al guardar o desde el historial.
 
 **Archivos clave:**
 

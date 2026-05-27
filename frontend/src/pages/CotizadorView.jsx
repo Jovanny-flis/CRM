@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { MoreVertical } from 'lucide-react';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
+import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 import {
   cotizacionAFormData,
@@ -10,6 +12,10 @@ import {
   formatMontoEnFormulario,
   limpiarCamposSoloAutomotriz,
 } from '../lib/cotizacionFormulario';
+import {
+  crearLeadOportunidad,
+  vincularCotizacionActiva,
+} from '../lib/destinoProspectoCotizacion';
 
 /** A4 @ 96dpi — dimensiones fijas para PDF consistente entre navegadores */
 const PDF_ANCHO_PX = 794;
@@ -120,6 +126,9 @@ const CotizadorView = () => {
 
   const [formData, setFormData] = useState(formDataCotizadorVacio);
   const [folioOrigenReplicacion, setFolioOrigenReplicacion] = useState(null);
+  const [modalDestino, setModalDestino] = useState(null);
+  const [referenciaLeadId, setReferenciaLeadId] = useState('');
+  const [menuHistorialId, setMenuHistorialId] = useState(null);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
@@ -171,6 +180,16 @@ const CotizadorView = () => {
     return () => { cancelado = true; };
   }, [location.state?.replicarCotizacionId, empresaId, navigate]);
 
+  useEffect(() => {
+    if (!menuHistorialId) return undefined;
+    const cerrarMenu = (e) => {
+      if (e.target.closest('[data-menu-historial-cot]')) return;
+      setMenuHistorialId(null);
+    };
+    document.addEventListener('click', cerrarMenu);
+    return () => document.removeEventListener('click', cerrarMenu);
+  }, [menuHistorialId]);
+
   const aplicarReplicacion = (cot) => {
     setFormData(cotizacionAFormData(cot, { paraReplicar: true }));
     setFolioOrigenReplicacion(cot.folio ?? null);
@@ -180,21 +199,24 @@ const CotizadorView = () => {
   const limpiarFormulario = () => {
     setFormData(formDataCotizadorVacio());
     setFolioOrigenReplicacion(null);
+    setReferenciaLeadId('');
   };
 
   const handleLeadChange = (e) => {
     const id = e.target.value;
-    const leadSel = leads.find(l => l.id === id);
-    setFormData(prev => ({ 
-      ...prev, 
-      lead_id: id, 
-      nombre_cliente: leadSel ? leadSel.nombre : '',
-      tipo_persona: leadSel ? (leadSel.tipo_persona || '') : '',
+    setReferenciaLeadId(id);
+    if (!id) return;
+    const leadSel = leads.find((l) => l.id === id);
+    setFormData((prev) => ({
+      ...prev,
+      lead_id: '',
+      nombre_cliente: leadSel ? leadSel.nombre : prev.nombre_cliente,
+      tipo_persona: leadSel ? (leadSel.tipo_persona || '') : prev.tipo_persona,
     }));
   };
 
   const sincronizarTipoPersonaLead = async (leadId) => {
-    const leadRef = leads.find(l => l.id === leadId);
+    const leadRef = leads.find((l) => l.id === leadId);
     if (!leadRef) return;
 
     const tipoForm = formData.tipo_persona || null;
@@ -211,6 +233,87 @@ const CotizadorView = () => {
       estatus_id: leadRef.estatus_id,
       tipo_persona: tipoForm,
     });
+  };
+
+  const ejecutarGuardadoConDestino = async (destino) => {
+    setGuardando(true);
+    let finalLeadId = null;
+
+    try {
+      if (destino.tipo === 'nuevo') {
+        finalLeadId = await crearLeadOportunidad(api, {
+          empresaId,
+          usuarioId: usuarioLogueado.id,
+          nombre: destino.nombre || formData.nombre_cliente,
+          tipoPersona: formData.tipo_persona || null,
+          valorActivo: parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0,
+          medio: 'Cotizador',
+        });
+        cargarLeads();
+      } else if (destino.tipo === 'existente') {
+        finalLeadId = destino.leadId;
+      }
+
+      const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
+        empresaId,
+        usuarioId: usuarioLogueado.id,
+        leadId: null,
+      }));
+
+      if (finalLeadId) {
+        await vincularCotizacionActiva(api, resCot.data.id, finalLeadId);
+        if (formData.tipo_persona) {
+          await sincronizarTipoPersonaLead(finalLeadId);
+        }
+        cargarLeads();
+      }
+
+      const avisoMigracion = resCot.data?.aviso ? `\n\n⚠️ ${resCot.data.aviso}` : '';
+      alert(`✅ Cotización guardada con éxito.${avisoMigracion}`);
+      setFolioOrigenReplicacion(null);
+      cargarHistorial();
+    } catch (error) {
+      const detalle = error.response?.data?.error || error.message;
+      console.error('Error al guardar cotización:', error.response?.data || error);
+      alert(`❌ Error al guardar: ${detalle}`);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const ejecutarGestionHistorial = async (cotizacion, destino) => {
+    try {
+      let leadId = null;
+      if (destino.tipo === 'nuevo') {
+        leadId = await crearLeadOportunidad(api, {
+          empresaId,
+          usuarioId: usuarioLogueado.id,
+          nombre: destino.nombre,
+          valorActivo: cotizacion.valor_activo || 0,
+          medio: 'Cotizador (Historial)',
+        });
+      } else if (destino.tipo === 'existente') {
+        leadId = destino.leadId;
+      }
+
+      await vincularCotizacionActiva(api, cotizacion.id, leadId);
+      alert('✅ Cotización vinculada al prospecto.');
+      cargarLeads();
+      cargarHistorial();
+    } catch (error) {
+      alert(`❌ ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  const resolverModalDestino = (destino) => {
+    const ctx = modalDestino;
+    setModalDestino(null);
+    if (!ctx) return;
+    if (ctx.modo === 'guardar') {
+      ejecutarGuardadoConDestino(destino);
+    } else {
+      ejecutarGestionHistorial(ctx.cotizacion, destino);
+    }
   };
 
   useEffect(() => {
@@ -287,109 +390,9 @@ const CotizadorView = () => {
     });
   }, [formData]);
 
-  const handleGuardarCotizacion = async () => {
-    if (!puedeGuardarOPdf) return;
-
-    setGuardando(true);
-    let finalLeadId = formData.lead_id || null;
-
-    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
-      ? armarNombreActivoAutomotriz(formData)
-      : formData.nombreActivo.trim();
-
-    try {
-      if (!finalLeadId) {
-        const crearProspecto = window.confirm(`¿Deseas generar a "${formData.nombre_cliente}" como un prospecto en tu tablero del CRM? \n\n(Si le das a Cancelar, solo se guardará la cotización)`);
-        
-        if (crearProspecto) {
-          const resPipe = await api.get(`/pipelines/${empresaId}`);
-          let primeraEtapaId = null;
-          if (resPipe.data.length > 0) {
-            const resEtapas = await api.get(`/etapas/${resPipe.data[0].id}`);
-            if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
-          }
-
-          const resLead = await api.post('/leads', {
-            empresa_id: empresaId,
-            nombre: formData.nombre_cliente,
-            correo: '', 
-            telefono: '',
-            valor: parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0,
-            medio: 'Cotizador',
-            tipo_persona: formData.tipo_persona || null,
-            stage_id: primeraEtapaId,
-            usuario_id: usuarioLogueado.id
-          });
-
-          finalLeadId = resLead.data?.id || null;
-          if (!finalLeadId) {
-            throw new Error('El prospecto se creó pero no se recibió su identificador.');
-          }
-          const resLeads = await api.get(`/leads/${empresaId}`);
-          setLeads(resLeads.data);
-        }
-      }
-
-      const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
-        empresaId,
-        usuarioId: usuarioLogueado.id,
-        leadId: finalLeadId,
-      }));
-
-      if (finalLeadId && formData.lead_id) {
-        await sincronizarTipoPersonaLead(finalLeadId);
-        cargarLeads();
-      }
-
-      const avisoMigracion = resCot.data?.aviso ? `\n\n⚠️ ${resCot.data.aviso}` : '';
-      alert(`✅ Cotización guardada con éxito.${avisoMigracion}`);
-      setFolioOrigenReplicacion(null);
-      cargarHistorial(); 
-    } catch (error) {
-      const detalle = error.response?.data?.error || error.message;
-      console.error('Error al guardar cotización:', error.response?.data || error);
-      alert(`❌ Error al guardar: ${detalle}`);
-    } finally {
-      setGuardando(false);
-    }
-  };
-
-  const convertirDesdeHistorial = async (cotizacion) => {
-    const nombreLead = window.prompt("Nombre del cliente para el nuevo prospecto:", "Cliente Cotización");
-    if (!nombreLead) return; 
-
-    try {
-      const resPipe = await api.get(`/pipelines/${empresaId}`);
-      let primeraEtapaId = null;
-      if (resPipe.data.length > 0) {
-        const resEtapas = await api.get(`/etapas/${resPipe.data[0].id}`);
-        if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
-      }
-
-      await api.post('/leads', {
-        empresa_id: empresaId,
-        nombre: nombreLead,
-        correo: '', 
-        telefono: '',
-        valor: cotizacion.valor_activo || 0,
-        medio: 'Cotizador (Historial)',
-        stage_id: primeraEtapaId,
-        usuario_id: usuarioLogueado.id
-      });
-
-      const resLeads = await api.get(`/leads/${empresaId}`);
-      setLeads(resLeads.data);
-      const leadNuevo = resLeads.data.find(l => l.nombre === nombreLead);
-
-      if (leadNuevo) {
-        await api.put(`/cotizaciones/${cotizacion.id}/vincular-lead`, { lead_id: leadNuevo.id });
-        alert("🎉 Prospecto creado y vinculado a la cotización exitosamente.");
-        cargarHistorial(); 
-      }
-
-    } catch (error) {
-      alert("Error al convertir a prospecto: " + error.message);
-    }
+  const handleGuardarCotizacion = () => {
+    if (!puedeGuardarOPdf || guardando) return;
+    setModalDestino({ modo: 'guardar' });
   };
 
   const imprimirPDF = async () => {
@@ -722,18 +725,21 @@ const CotizadorView = () => {
             
             <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                Prospecto CRM (Opcional)
+                Copiar datos de oportunidad existente (opcional)
               </label>
               <select 
-                value={formData.lead_id} 
+                value={referenciaLeadId} 
                 onChange={handleLeadChange} 
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
               >
-                <option value="">-- Escribir datos a mano --</option>
+                <option value="">-- Escribir nombre manualmente --</option>
                 {leads.map(l => (
                   <option key={l.id} value={l.id}>{l.nombre}</option>
                 ))}
               </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                No vincula al guardar. Al pulsar Guardar DB elegirás nueva oportunidad, existente o solo cotización.
+              </p>
             </div>
 
             <div>
@@ -1179,22 +1185,61 @@ const CotizadorView = () => {
     <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
 
     <td className="p-4 text-sm">
-      <div className="flex flex-col gap-2 items-start">
+      <div className="relative inline-block" data-menu-historial-cot>
         <button
           type="button"
-          onClick={() => aplicarReplicacion(cot)}
-          className="bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-blue-500 transition-colors shadow-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuHistorialId(menuHistorialId === cot.id ? null : cot.id);
+          }}
+          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          aria-label="Acciones de cotización"
         >
-          Replicar cotización
+          <MoreVertical size={18} />
         </button>
-        {!cot.lead_nombre && (
-          <button
-            type="button"
-            onClick={() => convertirDesdeHistorial(cot)}
-            className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
-          >
-            ➕ Hacer Prospecto
-          </button>
+        {menuHistorialId === cot.id && (
+          <div className="absolute right-0 z-20 mt-1 w-52 bg-white rounded-xl shadow-lg border border-slate-100 py-1">
+            <button
+              type="button"
+              onClick={() => {
+                setMenuHistorialId(null);
+                aplicarReplicacion(cot);
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Replicar cotización
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuHistorialId(null);
+                setModalDestino({
+                  modo: 'historial',
+                  cotizacion: cot,
+                  nombreInicial: cot.lead_nombre || '',
+                  pasoInicial: 'elegir',
+                });
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Nueva oportunidad
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuHistorialId(null);
+                setModalDestino({
+                  modo: 'historial',
+                  cotizacion: cot,
+                  nombreInicial: cot.lead_nombre || '',
+                  pasoInicial: 'existente',
+                });
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Vincular a oportunidad existente
+            </button>
+          </div>
         )}
       </div>
     </td>
@@ -1211,6 +1256,24 @@ const CotizadorView = () => {
           </table>
         </div>
       </div>
+
+      <ModalDestinoProspecto
+        abierto={Boolean(modalDestino)}
+        titulo={modalDestino?.modo === 'historial' ? 'Vincular cotización a prospecto' : '¿Cómo guardar la cotización?'}
+        subtitulo={
+          modalDestino?.modo === 'historial'
+            ? `Folio FL-${String(modalDestino?.cotizacion?.folio || 0).padStart(3, '0')}. Solo un folio activo por oportunidad; los demás se liberan.`
+            : `Cliente: ${formData.nombre_cliente}. Elige si creas una oportunidad nueva, vinculas a una existente o solo guardas el folio.`
+        }
+        modo={modalDestino?.modo === 'historial' ? 'historial' : 'guardar'}
+        nombreCliente={formData.nombre_cliente}
+        nombreInicial={modalDestino?.nombreInicial || ''}
+        pedirNombre={modalDestino?.modo === 'historial'}
+        pasoInicial={modalDestino?.pasoInicial || 'elegir'}
+        leads={leads}
+        onCerrar={() => setModalDestino(null)}
+        onConfirmar={resolverModalDestino}
+      />
 
     </div>
   );
