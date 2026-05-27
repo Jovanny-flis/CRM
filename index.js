@@ -28,6 +28,7 @@ const {
 } = require('./lib/estatus-leads');
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
 const { normalizarTipoPersona } = require('./lib/leads');
+const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -1171,35 +1172,13 @@ transporter.verify().then(() => {
 // ==========================================
 
 // 1. Guardar una nueva cotización
-app.post('/api/cotizaciones', (req, res) => {
-    const {
-        empresa_id, lead_id, usuario_id, 
-        tipo_activo, // <-- Sigue funcionando normal
-        marca, modelo, version, anio, nombre_activo,
-        valor_activo, plazo, tipo_renta, 
-        porcentaje_vr, vr_calculado, pago_inicial, 
-        renta_mensual_sin_iva, renta_mensual_con_iva
-    } = req.body;
-
+app.post('/api/cotizaciones', async (req, res) => {
+    const datos = normalizarDatosCotizacion(req.body);
+    const { lead_id, valor_activo } = datos;
     const nuevaCotizacionId = crypto.randomUUID();
 
-    const query = `
-        INSERT INTO cotizaciones 
-        (id, empresa_id, lead_id, usuario_id, tipo_activo, marca, modelo, version, anio, nombre_activo, valor_activo, plazo, tipo_renta, porcentaje_vr, vr_calculado, pago_inicial, renta_mensual_sin_iva, renta_mensual_con_iva) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    pool.query(query, [
-        nuevaCotizacionId, empresa_id, lead_id || null, usuario_id || null, 
-        tipo_activo, marca, modelo, version, anio, nombre_activo,
-        valor_activo, plazo, tipo_renta, 
-        porcentaje_vr, vr_calculado, pago_inicial, 
-        renta_mensual_sin_iva, renta_mensual_con_iva
-    ], async (error) => {
-        if (error) {
-            console.error("❌ ERROR AL GUARDAR COTIZACIÓN:", error.sqlMessage || error);
-            return res.status(500).json({ error: error.sqlMessage || "Error al guardar en BD" });
-        }
+    try {
+        const { modo } = await guardarCotizacion(pool, nuevaCotizacionId, datos);
 
         if (lead_id && valorEstimadoValido(valor_activo)) {
             try {
@@ -1212,8 +1191,17 @@ app.post('/api/cotizaciones', (req, res) => {
             }
         }
 
-        res.status(201).json({ mensaje: "✅ Cotización guardada con éxito", id: nuevaCotizacionId });
-    });
+        const respuesta = { mensaje: '✅ Cotización guardada con éxito', id: nuevaCotizacionId };
+        if (modo === 'legado') {
+            respuesta.aviso = 'Parámetros del cotizador no persistidos: ejecuta db/migrations/schema-v2.sql (sección 10) para réplica idéntica.';
+        }
+        res.status(201).json(respuesta);
+    } catch (error) {
+        console.error('❌ ERROR AL GUARDAR COTIZACIÓN:', error.sqlMessage || error.message || error);
+        res.status(500).json({
+            error: error.sqlMessage || error.message || 'Error al guardar en BD',
+        });
+    }
 });
 
 
@@ -1256,6 +1244,16 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
             return res.status(500).json({ error: error.sqlMessage || "Error al leer BD" });
         }
         res.status(200).json(resultados);
+    });
+});
+
+// Obtener una cotización por ID (réplica / detalle; después de rutas con segmento fijo)
+app.get('/api/cotizaciones/:id', (req, res) => {
+    const { id } = req.params;
+    pool.query('SELECT * FROM cotizaciones WHERE id = ?', [id], (error, resultados) => {
+        if (error) return res.status(500).json({ error: error.message });
+        if (resultados.length === 0) return res.status(404).json({ error: 'Cotización no encontrada.' });
+        res.status(200).json(resultados[0]);
     });
 });
 

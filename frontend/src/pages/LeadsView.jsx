@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
@@ -20,6 +21,7 @@ const valorMostrableLead = (lead) => {
 };
 
 function LeadsView() {
+  const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
   const [medios, setMedios] = useState([]);
   const [etapas, setEtapas] = useState([]);
@@ -972,15 +974,26 @@ function LeadsView() {
                         Cotización Asignada
                       </h3>
                       
-                      {/* Botón para cambiar cotización (SOLO EN EDICIÓN) */}
-                      {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && (
-                        <button 
-                          onClick={() => setMostrarBuscadorCotizacion(true)}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-700 underline shrink-0"
-                        >
-                          Cambiar Cotización
-                        </button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-3 shrink-0">
+                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && (
+                          <button
+                            type="button"
+                            onClick={() => navigate('/cotizador', { state: { replicarCotizacionId: leadEditando.cotizacion_id } })}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                          >
+                            Replicar cotización
+                          </button>
+                        )}
+                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && (
+                          <button
+                            type="button"
+                            onClick={() => setMostrarBuscadorCotizacion(true)}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                          >
+                            Cambiar Cotización
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* MOSTRAR DATOS SÚPER DETALLADOS DE LA COTIZACIÓN ACTUAL */}

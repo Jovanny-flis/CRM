@@ -15,6 +15,7 @@
 --   • Semilla activo/cancelado y asignación estatus_id en leads existentes
 --   • lead_etapas_historial (timestamps por etapa alcanzada hacia adelante)
 --   • cotizaciones: folio (AUTO_INCREMENT), nombre_activo, marca, modelo, version, anio
+--   • cotizaciones: parámetros del cotizador (tasa, pagos, seguro, GPS, etc.) para réplica idéntica
 --   • leads: tipo_persona (PM | PF | PFAE, opcional)
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
@@ -287,6 +288,45 @@ CALL crm_add_column_if_missing('cotizaciones', 'anio',
 -- -----------------------------------------------------------------------------
 CALL crm_add_column_if_missing('leads', 'tipo_persona',
   "VARCHAR(4) NULL DEFAULT NULL COMMENT 'PM | PF | PFAE' AFTER `medio`");
+
+-- -----------------------------------------------------------------------------
+-- 10) cotizaciones — parámetros completos del cotizador (réplica idéntica)
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('cotizaciones', 'tipo_arrendamiento',
+  "VARCHAR(20) NULL COMMENT 'Automotriz | Otro' AFTER `tipo_activo`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'tasa_anual',
+  "DECIMAL(5,2) NULL AFTER `plazo`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'pago_inicial_valor',
+  "DECIMAL(12,4) NULL COMMENT 'Valor capturado en formulario (monto o %)' AFTER `tasa_anual`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_pago_inicial_pct',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `pago_inicial_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'residual_valor',
+  "DECIMAL(12,4) NULL AFTER `is_pago_inicial_pct`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_residual_pct',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `residual_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'comision_valor',
+  "DECIMAL(12,4) NULL AFTER `is_residual_pct`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_comision_pct',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `comision_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'seguro_valor',
+  "DECIMAL(12,4) NULL AFTER `is_comision_pct`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_seguro_contado',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `seguro_valor`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_seguro_anual',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `is_seguro_contado`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'gps_valor',
+  "DECIMAL(12,4) NULL AFTER `is_seguro_anual`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_gps_contado',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `gps_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'servicios_valor',
+  "DECIMAL(12,4) NULL AFTER `is_gps_contado`");
 
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)

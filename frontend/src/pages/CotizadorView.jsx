@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
+import {
+  cotizacionAFormData,
+  formDataAPayloadCotizacion,
+  formDataCotizadorVacio,
+  formatMontoEnFormulario,
+  limpiarCamposSoloAutomotriz,
+} from '../lib/cotizacionFormulario';
 
 /** A4 @ 96dpi — dimensiones fijas para PDF consistente entre navegadores */
 const PDF_ANCHO_PX = 794;
@@ -96,21 +104,11 @@ function calcularPMT(tasaAnual, n, pv, fv) {
   return numerador / denominador;
 }
 
-// NUEVO: Función para formatear el número con comas mientras escribes
-const formatMontoFormulario = (val) => {
-  if (!val) return '';
-  // Quitamos todo lo que no sea número o punto
-  let rawValue = val.toString().replace(/[^0-9.]/g, '');
-  // Evitamos que pongan más de un punto
-  const parts = rawValue.split('.');
-  if (parts.length > 2) rawValue = parts[0] + '.' + parts.slice(1).join('');
-  // Separamos enteros de decimales y ponemos comas
-  const [enteros, decimales] = rawValue.split('.');
-  const enterosFormateados = enteros.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return decimales !== undefined ? `${enterosFormateados}.${decimales}` : enterosFormateados;
-};
+const formatMontoFormulario = formatMontoEnFormulario;
 
 const CotizadorView = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
   const [historial, setHistorial] = useState([]); 
   const [cargando, setCargando] = useState(true);
@@ -120,33 +118,8 @@ const CotizadorView = () => {
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
 
-  const [formData, setFormData] = useState({
-    lead_id: '', 
-    nombre_cliente: '',
-    tipo_persona: '',
-    tipoArrendamiento: 'Automotriz', 
-    tipoVehiculo: 'Sedan',
-    nombreActivo: '', 
-    marca: '', 
-    modelo: '',
-    version: '',
-    anio: '', 
-    valorActivo: '', 
-    plazo: '36', 
-    tasaAnual: '18',
-    pagoInicial: '', 
-    isPagoInicialPct: true, 
-    residual: '', 
-    isResidualPct: true,
-    comision: '', 
-    isComisionPct: true, 
-    seguro: '', 
-    isSeguroContado: true, 
-    isSeguroAnual: true,
-    gps: '', 
-    isGpsContado: true, 
-    servicios: ''
-  });
+  const [formData, setFormData] = useState(formDataCotizadorVacio);
+  const [folioOrigenReplicacion, setFolioOrigenReplicacion] = useState(null);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
@@ -174,6 +147,40 @@ const CotizadorView = () => {
       setCargando(false);
     }
   }, [empresaId]);
+
+  useEffect(() => {
+    const cotId = location.state?.replicarCotizacionId;
+    if (!cotId || !empresaId) return undefined;
+
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await api.get(`/cotizaciones/${cotId}`);
+        if (cancelado) return;
+        setFormData(cotizacionAFormData(res.data, { paraReplicar: true }));
+        setFolioOrigenReplicacion(res.data.folio ?? null);
+        navigate('/cotizador', { replace: true, state: {} });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (error) {
+        console.error('Error al replicar cotización:', error);
+        alert('No se pudo cargar la cotización a replicar.');
+        navigate('/cotizador', { replace: true, state: {} });
+      }
+    })();
+
+    return () => { cancelado = true; };
+  }, [location.state?.replicarCotizacionId, empresaId, navigate]);
+
+  const aplicarReplicacion = (cot) => {
+    setFormData(cotizacionAFormData(cot, { paraReplicar: true }));
+    setFolioOrigenReplicacion(cot.folio ?? null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const limpiarFormulario = () => {
+    setFormData(formDataCotizadorVacio());
+    setFolioOrigenReplicacion(null);
+  };
 
   const handleLeadChange = (e) => {
     const id = e.target.value;
@@ -238,9 +245,10 @@ const CotizadorView = () => {
     const comInput = parseFloat(String(formData.comision).replace(/,/g, '')) || 0;
     const comisionReal = formData.isComisionPct ? comInput * (valorActivo - inicialReal) / 100 : comInput;
 
-    const gpsInput = parseFloat(String(formData.gps).replace(/,/g, '')) || 0;
-    const gpsContado = formData.isGpsContado ? gpsInput : 0;
-    const serviciosReal = parseFloat(String(formData.servicios).replace(/,/g, '')) || 0;
+    const esAutomotriz = formData.tipoArrendamiento === 'Automotriz';
+    const gpsInput = esAutomotriz ? (parseFloat(String(formData.gps).replace(/,/g, '')) || 0) : 0;
+    const gpsContado = esAutomotriz && formData.isGpsContado ? gpsInput : 0;
+    const serviciosReal = esAutomotriz ? (parseFloat(String(formData.servicios).replace(/,/g, '')) || 0) : 0;
 
     const seguroInput = parseFloat(String(formData.seguro).replace(/,/g, '')) || 0;
     let seguroContado = formData.isSeguroContado ? seguroInput : 0;
@@ -253,7 +261,9 @@ const CotizadorView = () => {
     const comisionSub = comisionReal / 1.16;
 
     const seguroFinMensual = !formData.isSeguroContado ? calcularPMT(tasaAnual, (formData.isSeguroAnual ? 12 : plazo), seguroFinanciadoBase, 0) : 0;
-    const gpsFinMensual = !formData.isGpsContado ? calcularPMT(tasaAnual, plazo, gpsInput, 0) : 0;
+    const gpsFinMensual = esAutomotriz && !formData.isGpsContado
+      ? calcularPMT(tasaAnual, plazo, gpsInput, 0)
+      : 0;
 
     const pvActivo = valorActivo - inicialReal;
     const r = (tasaAnual * 1.16) / 12 / 100;
@@ -299,7 +309,7 @@ const CotizadorView = () => {
             if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
           }
 
-          await api.post('/leads', {
+          const resLead = await api.post('/leads', {
             empresa_id: empresaId,
             nombre: formData.nombre_cliente,
             correo: '', 
@@ -311,43 +321,34 @@ const CotizadorView = () => {
             usuario_id: usuarioLogueado.id
           });
 
+          finalLeadId = resLead.data?.id || null;
+          if (!finalLeadId) {
+            throw new Error('El prospecto se creó pero no se recibió su identificador.');
+          }
           const resLeads = await api.get(`/leads/${empresaId}`);
           setLeads(resLeads.data);
-          const leadNuevo = resLeads.data.find(l => l.nombre === formData.nombre_cliente);
-          if (leadNuevo) finalLeadId = leadNuevo.id;
         }
       }
 
-      await api.post('/cotizaciones', {
-        empresa_id: empresaId, 
-        lead_id: finalLeadId, 
-        usuario_id: usuarioLogueado.id,
-        tipo_activo: formData.tipoArrendamiento === 'Automotriz' ? formData.tipoVehiculo : formData.tipoArrendamiento,
-        marca: formData.tipoArrendamiento === 'Automotriz' ? formData.marca : '',
-        modelo: formData.tipoArrendamiento === 'Automotriz' ? formData.modelo : '',
-        version: formData.tipoArrendamiento === 'Automotriz' ? formData.version : '',
-        anio: formData.tipoArrendamiento === 'Automotriz' ? formData.anio : '',
-        nombre_activo: nombreCombinado,
-        // MODIFICADO: Guardar sin comas en la BD
-        valor_activo: parseFloat(String(formData.valorActivo).replace(/,/g, '')), 
-        plazo: parseInt(formData.plazo), 
-        tipo_renta: 'Vencida',
-        porcentaje_vr: formData.isResidualPct ? parseFloat(String(formData.residual).replace(/,/g, '')) : 0, 
-        vr_calculado: res.residualReal, 
-        pago_inicial: res.pagoInicialTotal,
-        renta_mensual_sin_iva: res.rentaMensualSubtotal, 
-        renta_mensual_con_iva: res.rentaMensualTotal
-      });
+      const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
+        empresaId,
+        usuarioId: usuarioLogueado.id,
+        leadId: finalLeadId,
+      }));
 
       if (finalLeadId && formData.lead_id) {
         await sincronizarTipoPersonaLead(finalLeadId);
         cargarLeads();
       }
 
-      alert("✅ Cotización guardada con éxito.");
+      const avisoMigracion = resCot.data?.aviso ? `\n\n⚠️ ${resCot.data.aviso}` : '';
+      alert(`✅ Cotización guardada con éxito.${avisoMigracion}`);
+      setFolioOrigenReplicacion(null);
       cargarHistorial(); 
     } catch (error) {
-      alert("❌ Error al guardar: " + error.message);
+      const detalle = error.response?.data?.error || error.message;
+      console.error('Error al guardar cotización:', error.response?.data || error);
+      alert(`❌ Error al guardar: ${detalle}`);
     } finally {
       setGuardando(false);
     }
@@ -694,12 +695,18 @@ const CotizadorView = () => {
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
         <button 
-          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', version:'', anio:'', nombreActivo:''})} 
+          onClick={limpiarFormulario} 
           className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
         >
           Limpiar Campos
         </button>
       </header>
+
+      {folioOrigenReplicacion != null && (
+        <div className="mb-6 p-4 bg-amber-50 text-amber-900 rounded-xl border border-amber-200 text-sm font-medium">
+          Parámetros copiados de FL-{String(folioOrigenReplicacion).padStart(3, '0')}. Al guardar se asignará un folio nuevo; la cotización original no se modifica.
+        </div>
+      )}
 
       {errores.general && (
         <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 font-bold text-sm">
@@ -763,7 +770,27 @@ const CotizadorView = () => {
               </label>
               <select 
                 value={formData.tipoArrendamiento} 
-                onChange={e => setFormData({...formData, tipoArrendamiento: e.target.value})} 
+                onChange={(e) => {
+                  const tipoArrendamiento = e.target.value;
+                  if (tipoArrendamiento === 'Automotriz') {
+                    setFormData((prev) => ({
+                      ...prev,
+                      tipoArrendamiento,
+                      nombreActivo: '',
+                    }));
+                  } else {
+                    setFormData((prev) => ({
+                      ...prev,
+                      tipoArrendamiento,
+                      marca: '',
+                      modelo: '',
+                      version: '',
+                      anio: '',
+                      tipoVehiculo: 'Sedan',
+                      ...limpiarCamposSoloAutomotriz(),
+                    }));
+                  }
+                }} 
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
               >
                 <option value="Automotriz">Automotriz</option>
@@ -947,16 +974,20 @@ const CotizadorView = () => {
               </div>
             </div>
 
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <div className={`p-4 rounded-xl border ${formData.tipoArrendamiento === 'Automotriz' ? 'bg-slate-50 border-slate-100' : 'bg-slate-100/80 border-slate-200'}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Trámites e impuestos
+                {formData.tipoArrendamiento !== 'Automotriz' && (
+                  <span className="ml-2 font-normal normal-case text-slate-400">(solo Automotriz)</span>
+                )}
               </label>
               <input 
                 type="number" 
-                value={formData.servicios} 
+                value={formData.tipoArrendamiento === 'Automotriz' ? formData.servicios : ''} 
                 onChange={e => setFormData({...formData, servicios: e.target.value})} 
-                className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none" 
+                className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400" 
                 disabled={formData.tipoArrendamiento !== 'Automotriz'} 
+                placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
               />
             </div>
 
@@ -981,20 +1012,32 @@ const CotizadorView = () => {
                 </div>
               </div>
               
-              <div>
+              <div className={formData.tipoArrendamiento !== 'Automotriz' ? 'opacity-60' : ''}>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                   GPS
+                  {formData.tipoArrendamiento !== 'Automotriz' && (
+                    <span className="ml-2 font-normal normal-case text-slate-400">(solo Automotriz)</span>
+                  )}
                 </label>
                 <input 
                   type="number" 
-                  value={formData.gps} 
+                  value={formData.tipoArrendamiento === 'Automotriz' ? formData.gps : ''} 
                   onChange={e => setFormData({...formData, gps: e.target.value})} 
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2" 
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2 disabled:bg-slate-100 disabled:text-slate-400" 
                   disabled={formData.tipoArrendamiento !== 'Automotriz'} 
+                  placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
                 />
                 <div className="flex gap-2">
-                  <ToggleBtn flag={formData.isGpsContado} onClick={() => setFormData({...formData, isGpsContado: true})} label="Contado" />
-                  <ToggleBtn flag={!formData.isGpsContado} onClick={() => setFormData({...formData, isGpsContado: false})} label="Financiado" />
+                  <ToggleBtn
+                    flag={formData.isGpsContado}
+                    onClick={() => formData.tipoArrendamiento === 'Automotriz' && setFormData({...formData, isGpsContado: true})}
+                    label="Contado"
+                  />
+                  <ToggleBtn
+                    flag={!formData.isGpsContado}
+                    onClick={() => formData.tipoArrendamiento === 'Automotriz' && setFormData({...formData, isGpsContado: false})}
+                    label="Financiado"
+                  />
                 </div>
               </div>
             </div>
@@ -1136,14 +1179,24 @@ const CotizadorView = () => {
     <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
 
     <td className="p-4 text-sm">
-      {!cot.lead_nombre && (
-        <button 
-          onClick={() => convertirDesdeHistorial(cot)}
-          className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+      <div className="flex flex-col gap-2 items-start">
+        <button
+          type="button"
+          onClick={() => aplicarReplicacion(cot)}
+          className="bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-blue-500 transition-colors shadow-sm"
         >
-          ➕ Hacer Prospecto
+          Replicar cotización
         </button>
-      )}
+        {!cot.lead_nombre && (
+          <button
+            type="button"
+            onClick={() => convertirDesdeHistorial(cot)}
+            className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+          >
+            ➕ Hacer Prospecto
+          </button>
+        )}
+      </div>
     </td>
   </tr>
 ))}
