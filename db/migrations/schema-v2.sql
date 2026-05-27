@@ -16,6 +16,7 @@
 --   • lead_etapas_historial (timestamps por etapa alcanzada hacia adelante)
 --   • cotizaciones: folio (AUTO_INCREMENT), nombre_activo, marca, modelo, version, anio
 --   • cotizaciones: parámetros del cotizador (tasa, pagos, seguro, GPS, etc.) para réplica idéntica
+--   • gps_proveedores + gps_productos — catálogo GPS por empresa (cotizador)
 --   • leads: tipo_persona (PM | PF | PFAE, opcional)
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
@@ -333,6 +334,32 @@ CALL crm_add_column_if_missing('cotizaciones', 'is_gps_contado',
 
 CALL crm_add_column_if_missing('cotizaciones', 'servicios_valor',
   "DECIMAL(12,4) NULL AFTER `is_gps_contado`");
+
+-- -----------------------------------------------------------------------------
+-- 11) Catálogo GPS por empresa (proveedores → productos con precio IVA incl.)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `gps_proveedores` (
+  `id` varchar(36) NOT NULL,
+  `empresa_id` int(11) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_gps_proveedor_empresa_nombre` (`empresa_id`, `nombre`),
+  KEY `idx_gps_proveedores_empresa` (`empresa_id`),
+  CONSTRAINT `fk_gps_proveedores_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `gps_productos` (
+  `id` varchar(36) NOT NULL,
+  `proveedor_id` varchar(36) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `precio` decimal(12,4) NOT NULL COMMENT 'Precio con IVA incluido',
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_gps_producto_proveedor_nombre` (`proveedor_id`, `nombre`),
+  KEY `idx_gps_productos_proveedor` (`proveedor_id`),
+  CONSTRAINT `fk_gps_productos_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `gps_proveedores` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)

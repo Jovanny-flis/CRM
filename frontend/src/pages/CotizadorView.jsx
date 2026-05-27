@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MoreVertical } from 'lucide-react';
+import { MoreVertical, Plus } from 'lucide-react';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
 import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
+import AdminGpsCatalogoPanel from '../components/AdminGpsCatalogoPanel';
+import SelectorGpsPrecio from '../components/SelectorGpsPrecio';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 import {
   cotizacionAFormData,
@@ -126,12 +128,16 @@ const CotizadorView = () => {
 
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
+  const muestraCatalogoGps = Boolean(empresaId) && usuarioLogueado.rol !== 'super_admin';
+  const puedeAdministrarGps = ['admin_empresa', 'supervisor'].includes(usuarioLogueado.rol);
 
   const [formData, setFormData] = useState(formDataCotizadorVacio);
   const [folioOrigenReplicacion, setFolioOrigenReplicacion] = useState(null);
   const [modalDestino, setModalDestino] = useState(null);
   const [referenciaNombreClave, setReferenciaNombreClave] = useState('');
   const [menuHistorialId, setMenuHistorialId] = useState(null);
+  const [gpsCatalogo, setGpsCatalogo] = useState([]);
+  const [panelGpsAbierto, setPanelGpsAbierto] = useState(false);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
@@ -161,6 +167,14 @@ const CotizadorView = () => {
       setCargando(false);
     }
   }, [empresaId]);
+
+  useEffect(() => {
+    if (!muestraCatalogoGps) return undefined;
+    api.get(`/gps-catalogo/${empresaId}`)
+      .then((res) => setGpsCatalogo(res.data))
+      .catch((err) => console.error('Error al cargar catálogo GPS:', err));
+    return undefined;
+  }, [empresaId, muestraCatalogoGps]);
 
   useEffect(() => {
     const cotId = location.state?.replicarCotizacionId;
@@ -1038,20 +1052,48 @@ const CotizadorView = () => {
               </div>
               
               <div className={formData.tipoArrendamiento !== 'Automotriz' ? 'opacity-60' : ''}>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                  GPS
-                  {formData.tipoArrendamiento !== 'Automotriz' && (
-                    <span className="ml-2 font-normal normal-case text-slate-400">(solo Automotriz)</span>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-xs font-bold text-slate-500 uppercase">
+                    GPS
+                    {formData.tipoArrendamiento !== 'Automotriz' && (
+                      <span className="ml-2 font-normal normal-case text-slate-400">(solo Automotriz)</span>
+                    )}
+                  </label>
+                  {puedeAdministrarGps && formData.tipoArrendamiento === 'Automotriz' && (
+                    <button
+                      type="button"
+                      onClick={() => setPanelGpsAbierto(true)}
+                      className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-slate-200 bg-slate-50 text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors"
+                      title="Administrar catálogo GPS"
+                      aria-label="Administrar catálogo GPS"
+                    >
+                      <Plus size={14} />
+                    </button>
                   )}
-                </label>
-                <input 
-                  type="number" 
-                  value={formData.tipoArrendamiento === 'Automotriz' ? formData.gps : ''} 
-                  onChange={e => setFormData({...formData, gps: e.target.value})} 
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2 disabled:bg-slate-100 disabled:text-slate-400" 
-                  disabled={formData.tipoArrendamiento !== 'Automotriz'} 
-                  placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
-                />
+                </div>
+                <div className="flex mb-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.tipoArrendamiento === 'Automotriz' ? formData.gps : ''}
+                    onChange={(e) => setFormData({ ...formData, gps: e.target.value })}
+                    className={`flex-1 min-w-0 border border-slate-200 px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                      muestraCatalogoGps ? 'rounded-l-xl rounded-r-none' : 'rounded-xl'
+                    }`}
+                    disabled={formData.tipoArrendamiento !== 'Automotriz'}
+                    placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
+                  />
+                  {muestraCatalogoGps && (
+                    <SelectorGpsPrecio
+                      catalogo={gpsCatalogo}
+                      disabled={formData.tipoArrendamiento !== 'Automotriz'}
+                      onSeleccionarPrecio={(precio) =>
+                        setFormData({ ...formData, gps: String(precio) })
+                      }
+                    />
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <ToggleBtn
                     flag={formData.isGpsContado}
@@ -1293,6 +1335,16 @@ const CotizadorView = () => {
         onCerrar={() => setModalDestino(null)}
         onConfirmar={resolverModalDestino}
       />
+
+      {puedeAdministrarGps && (
+        <AdminGpsCatalogoPanel
+          abierto={panelGpsAbierto}
+          onCerrar={() => setPanelGpsAbierto(false)}
+          empresaId={empresaId}
+          catalogo={gpsCatalogo}
+          onCatalogoActualizado={setGpsCatalogo}
+        />
+      )}
 
     </div>
   );

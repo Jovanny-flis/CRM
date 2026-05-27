@@ -30,6 +30,7 @@ const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-his
 const { normalizarTipoPersona } = require('./lib/leads');
 const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
 const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
+const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -1087,6 +1088,256 @@ app.delete('/api/medios/:id',
         });
     },
 );
+
+// ==========================================
+// CATÁLOGO GPS (COTIZADOR)
+// ==========================================
+
+const ROLES_CATALOGO_GPS_LECTURA = ['super_admin', 'supervisor', 'admin_empresa', 'agente'];
+const ROLES_CATALOGO_GPS_EDICION = ['super_admin', 'supervisor', 'admin_empresa'];
+
+app.get('/api/gps-catalogo/:empresa_id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_LECTURA),
+    validarEmpresaParam('empresa_id'),
+    async (req, res) => {
+        const { empresa_id } = req.params;
+
+        try {
+            const catalogo = await listarCatalogoGpsEmpresa(pool.promise(), empresa_id);
+            res.status(200).json(catalogo);
+        } catch (error) {
+            console.error('🚨 Error al listar catálogo GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al listar catálogo GPS' });
+        }
+    },
+);
+
+app.post('/api/gps-proveedores',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    async (req, res) => {
+        const { empresa_id, nombre } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!empresa_id) return res.status(400).json({ error: 'empresa_id es requerido.' });
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del proveedor es obligatorio.' });
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+            return res.status(403).json({ error: 'No puedes crear proveedores GPS en otra empresa.' });
+        }
+
+        const db = pool.promise();
+
+        try {
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_proveedores WHERE empresa_id = ? AND nombre = ? LIMIT 1',
+                [empresa_id, nombreLimpio],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un proveedor GPS con ese nombre.' });
+            }
+
+            const id = crypto.randomUUID();
+            await db.query(
+                'INSERT INTO gps_proveedores (id, empresa_id, nombre) VALUES (?, ?, ?)',
+                [id, empresa_id, nombreLimpio],
+            );
+
+            res.status(201).json({ mensaje: 'Proveedor GPS creado', id, nombre: nombreLimpio });
+        } catch (error) {
+            console.error('❌ Error al crear proveedor GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al crear proveedor GPS' });
+        }
+    },
+);
+
+app.put('/api/gps-proveedores/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa('SELECT empresa_id FROM gps_proveedores WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+        const { nombre } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del proveedor es obligatorio.' });
+
+        const db = pool.promise();
+
+        try {
+            const [actual] = await db.query(
+                'SELECT id, empresa_id FROM gps_proveedores WHERE id = ? LIMIT 1',
+                [id],
+            );
+            if (!actual.length) return res.status(404).json({ error: 'Proveedor GPS no encontrado.' });
+
+            const empresaId = actual[0].empresa_id;
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_proveedores WHERE empresa_id = ? AND nombre = ? AND id <> ? LIMIT 1',
+                [empresaId, nombreLimpio, id],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un proveedor GPS con ese nombre.' });
+            }
+
+            await db.query('UPDATE gps_proveedores SET nombre = ? WHERE id = ?', [nombreLimpio, id]);
+            res.status(200).json({ mensaje: 'Proveedor GPS actualizado', id, nombre: nombreLimpio });
+        } catch (error) {
+            console.error('❌ Error al actualizar proveedor GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al actualizar proveedor GPS' });
+        }
+    },
+);
+
+app.delete('/api/gps-proveedores/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa('SELECT empresa_id FROM gps_proveedores WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+
+        try {
+            await pool.promise().query('DELETE FROM gps_proveedores WHERE id = ?', [id]);
+            res.status(200).json({
+                mensaje: 'Proveedor GPS eliminado. Las cotizaciones guardadas conservan el precio asignado.',
+            });
+        } catch (error) {
+            console.error('❌ Error al eliminar proveedor GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al eliminar proveedor GPS' });
+        }
+    },
+);
+
+app.post('/api/gps-productos',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    async (req, res) => {
+        const { proveedor_id, nombre, precio } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!proveedor_id) return res.status(400).json({ error: 'proveedor_id es requerido.' });
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del producto es obligatorio.' });
+        if (!precioGpsValido(precio)) {
+            return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero.' });
+        }
+
+        const db = pool.promise();
+
+        try {
+            const [proveedor] = await db.query(
+                'SELECT id, empresa_id FROM gps_proveedores WHERE id = ? LIMIT 1',
+                [proveedor_id],
+            );
+            if (!proveedor.length) {
+                return res.status(404).json({ error: 'Proveedor GPS no encontrado.' });
+            }
+            if (!puedeOperarEnEmpresa(req.usuarioCRM, proveedor[0].empresa_id)) {
+                return res.status(403).json({ error: 'No puedes crear productos GPS en otra empresa.' });
+            }
+
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_productos WHERE proveedor_id = ? AND nombre = ? LIMIT 1',
+                [proveedor_id, nombreLimpio],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un producto con ese nombre en este proveedor.' });
+            }
+
+            const id = crypto.randomUUID();
+            const precioNum = Number(precio);
+            await db.query(
+                'INSERT INTO gps_productos (id, proveedor_id, nombre, precio) VALUES (?, ?, ?, ?)',
+                [id, proveedor_id, nombreLimpio, precioNum],
+            );
+
+            res.status(201).json({
+                mensaje: 'Producto GPS creado',
+                id,
+                proveedor_id,
+                nombre: nombreLimpio,
+                precio: precioNum,
+            });
+        } catch (error) {
+            console.error('❌ Error al crear producto GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al crear producto GPS' });
+        }
+    },
+);
+
+app.put('/api/gps-productos/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa(
+        'SELECT p.empresa_id FROM gps_productos pr JOIN gps_proveedores p ON p.id = pr.proveedor_id WHERE pr.id = ?',
+    ),
+    async (req, res) => {
+        const { id } = req.params;
+        const { nombre, precio } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del producto es obligatorio.' });
+        if (!precioGpsValido(precio)) {
+            return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero.' });
+        }
+
+        const db = pool.promise();
+
+        try {
+            const [actual] = await db.query(
+                'SELECT id, proveedor_id FROM gps_productos WHERE id = ? LIMIT 1',
+                [id],
+            );
+            if (!actual.length) return res.status(404).json({ error: 'Producto GPS no encontrado.' });
+
+            const proveedorId = actual[0].proveedor_id;
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_productos WHERE proveedor_id = ? AND nombre = ? AND id <> ? LIMIT 1',
+                [proveedorId, nombreLimpio, id],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un producto con ese nombre en este proveedor.' });
+            }
+
+            const precioNum = Number(precio);
+            await db.query(
+                'UPDATE gps_productos SET nombre = ?, precio = ? WHERE id = ?',
+                [nombreLimpio, precioNum, id],
+            );
+
+            res.status(200).json({
+                mensaje: 'Producto GPS actualizado',
+                id,
+                nombre: nombreLimpio,
+                precio: precioNum,
+            });
+        } catch (error) {
+            console.error('❌ Error al actualizar producto GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al actualizar producto GPS' });
+        }
+    },
+);
+
+app.delete('/api/gps-productos/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa(
+        'SELECT p.empresa_id FROM gps_productos pr JOIN gps_proveedores p ON p.id = pr.proveedor_id WHERE pr.id = ?',
+    ),
+    async (req, res) => {
+        const { id } = req.params;
+
+        try {
+            await pool.promise().query('DELETE FROM gps_productos WHERE id = ?', [id]);
+            res.status(200).json({
+                mensaje: 'Producto GPS eliminado. Las cotizaciones guardadas conservan el precio asignado.',
+            });
+        } catch (error) {
+            console.error('❌ Error al eliminar producto GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al eliminar producto GPS' });
+        }
+    },
+);
+
 // 1. RUTA PARA MOVER DE ETAPA (Drag & Drop)
 app.put('/api/leads/:id/etapa',
     verificarToken,
