@@ -13,10 +13,29 @@ export const etiquetaLeadOpcion = (lead) => {
   return `${lead.nombre} — ${folio} — ${etapa}${estatusTxt}`;
 };
 
+/** Clave normalizada para agrupar prospectos por nombre en listas. */
+export const claveNombreLead = (nombre) => String(nombre || '').trim().toLowerCase();
+
 export const leadsMismoNombre = (leads, nombre) => {
-  const clave = String(nombre || '').trim().toLowerCase();
+  const clave = claveNombreLead(nombre);
   if (!clave) return [];
-  return leads.filter((l) => String(l.nombre || '').trim().toLowerCase() === clave);
+  return leads.filter((l) => claveNombreLead(l.nombre) === clave);
+};
+
+/**
+ * Una entrada por nombre de prospecto (p. ej. rellenar persona en cotizador).
+ * Conserva el lead más reciente por nombre (lista ordenada por created_at DESC).
+ */
+export const leadsPorNombreUnico = (leads) => {
+  const vistos = new Map();
+  for (const lead of leads) {
+    const clave = claveNombreLead(lead.nombre);
+    if (!clave || vistos.has(clave)) continue;
+    vistos.set(clave, lead);
+  }
+  return Array.from(vistos.values()).sort((a, b) =>
+    String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' }),
+  );
 };
 
 export const obtenerPrimeraEtapaPipeline = async (api, empresaId) => {

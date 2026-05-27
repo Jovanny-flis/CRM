@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MoreVertical } from 'lucide-react';
 import api from '../api';
@@ -14,7 +14,9 @@ import {
   archivoImagenActivoPdf,
 } from '../lib/cotizacionFormulario';
 import {
+  claveNombreLead,
   crearLeadOportunidad,
+  leadsPorNombreUnico,
   vincularCotizacionActiva,
 } from '../lib/destinoProspectoCotizacion';
 
@@ -128,13 +130,15 @@ const CotizadorView = () => {
   const [formData, setFormData] = useState(formDataCotizadorVacio);
   const [folioOrigenReplicacion, setFolioOrigenReplicacion] = useState(null);
   const [modalDestino, setModalDestino] = useState(null);
-  const [referenciaLeadId, setReferenciaLeadId] = useState('');
+  const [referenciaNombreClave, setReferenciaNombreClave] = useState('');
   const [menuHistorialId, setMenuHistorialId] = useState(null);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
 
   const puedeGuardarOPdf = cotizacionListaParaAccion(formData, errores);
+
+  const leadsNombreUnico = useMemo(() => leadsPorNombreUnico(leads), [leads]);
 
   const cargarHistorial = () => {
     api.get(`/cotizaciones/empresa/${empresaId}?usuario_id=${usuarioLogueado.id}&rol=${usuarioLogueado.rol}`)
@@ -200,14 +204,14 @@ const CotizadorView = () => {
   const limpiarFormulario = () => {
     setFormData(formDataCotizadorVacio());
     setFolioOrigenReplicacion(null);
-    setReferenciaLeadId('');
+    setReferenciaNombreClave('');
   };
 
   const handleLeadChange = (e) => {
-    const id = e.target.value;
-    setReferenciaLeadId(id);
-    if (!id) return;
-    const leadSel = leads.find((l) => l.id === id);
+    const clave = e.target.value;
+    setReferenciaNombreClave(clave);
+    if (!clave) return;
+    const leadSel = leadsNombreUnico.find((l) => claveNombreLead(l.nombre) === clave);
     setFormData((prev) => ({
       ...prev,
       lead_id: '',
@@ -740,14 +744,17 @@ const CotizadorView = () => {
                 Copiar datos de lead existente (opcional)
               </label>
               <select 
-                value={referenciaLeadId} 
+                value={referenciaNombreClave} 
                 onChange={handleLeadChange} 
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
               >
                 <option value="">-- Escribir nombre manualmente --</option>
-                {leads.map(l => (
-                  <option key={l.id} value={l.id}>{l.nombre}</option>
-                ))}
+                {leadsNombreUnico.map((l) => {
+                  const clave = claveNombreLead(l.nombre);
+                  return (
+                    <option key={clave} value={clave}>{l.nombre}</option>
+                  );
+                })}
               </select>
               <p className="text-[11px] text-slate-500 mt-1">
                 No vincula al guardar. Al pulsar Guardar DB elegirás nuevo lead, existente o solo cotización.

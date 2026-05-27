@@ -15,9 +15,9 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Empresas           | CRUD de empresas (alcance `super_admin` en API). |
 | Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa. |
 | Pipelines y etapas | Embudos y etapas por empresa. |
-| Leads              | Prospectos, canales (`lead_sources`), estatus configurables (`lead_estatus`), **tipo de persona** opcional (`tipo_persona`: `PM`, `PF`, `PFAE`) en alta/edición y badge en el tablero Kanban, tablero con drag & drop, confirmación al avanzar de etapa, trazabilidad temporal por etapa (`lead_etapas_historial`) y cancelación con motivo. |
+| Leads              | **Oportunidades** en el embudo (tabla `leads`): varias por empresa con el **mismo nombre** de cliente; en el Kanban se distinguen por etapa, estatus, folio activo y demás datos de la tarjeta. Canales (`lead_sources`), estatus (`lead_estatus`), **tipo de persona** opcional (`PM`, `PF`, `PFAE`), drag & drop, confirmación al avanzar de etapa, `lead_etapas_historial` y cancelación con motivo. **Un folio activo por lead** en tablero; **Cambiar cotización** en el modal sustituye el folio visible y libera los demás (`lead_id` NULL). |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). |
-| Cotizador          | Cálculo de arrendamiento y guardado de cotizaciones con folio secuencial (FL-001…). Tipos **Automotriz** (`marca`, `modelo`, `version`, `año`; `nombre_activo` = `marca - modelo - version - año`) y **Otro** (`nombre_activo` libre). **GPS** y **trámites e impuestos** solo aplican en Automotriz (en Otro se excluyen del cálculo y se persisten en 0). Parámetros completos del formulario se guardan en BD (migración §10 de `schema-v2.sql`) para **réplica idéntica**. Acción **Replicar cotización** en historial del cotizador y en el modal de lead: abre el formulario con los mismos parámetros, sin prospecto ni nombre de cliente; al **Guardar DB** se crea un **folio nuevo** sin modificar la cotización origen. Los botones **Guardar DB** y **Generar PDF** exigen campos obligatorios y cotización sin errores de cálculo. Vinculación a leads desde Kanban; `tipo_persona` opcional al cotizar. API `/api/cotizaciones` sin `Authorization` (público por producto); la UI del cotizador requiere login en la SPA. |
+| Cotizador          | Cálculo y folio secuencial (FL-001…). **Automotriz** / **Otro** (GPS y trámites solo en Automotriz). Parámetros §10 en BD para **réplica idéntica**. **Guardar DB** abre modal: solo cotización, **nueva oportunidad** o **vincular a existente** (`ModalDestinoProspecto`). El select del formulario lista **un nombre por persona** y solo **copia** nombre/tipo de persona; no vincula al guardar. **Réplica** sin nombre ni prospecto; el operador completa y decide al guardar o desde el historial (menú ⋮). **Generar PDF** y guardado exigen obligatorios y sin errores de cálculo. API `/api/cotizaciones` pública por producto; la SPA exige login. |
 
 ---
 
@@ -114,6 +114,7 @@ CRM/
     ├── package-lock.json
     ├── postcss.config.js
     ├── public/
+    │   ├── cotizacion-activos/
     │   └── icons.svg
     ├── tailwind.config.js
     ├── vite.config.js
@@ -129,6 +130,7 @@ CRM/
         ├── components/
         │   ├── AdminEstatusLeads.jsx
         │   ├── AvisoSesionModal.jsx
+        │   ├── ModalDestinoProspecto.jsx
         │   ├── SelectorCanales.jsx
         │   └── Sidebar.jsx
         ├── constants/
@@ -139,6 +141,7 @@ CRM/
         │   └── DashboardLayout.jsx
         ├── lib/
         │   ├── cotizacionFormulario.js
+        │   ├── destinoProspectoCotizacion.js
         │   └── sesion.js
         └── pages/
             ├── AgentesView.jsx
@@ -251,8 +254,17 @@ Relaciones principales:
 - `pipeline_stages` (1) → (N) `lead_etapas_historial`
 - `lead_estatus` (1) → (N) `leads` vía `estatus_id`
 - `usuarios` (1) → (N) `leads`, `cotizaciones` (campos opcionales según tabla)
-- `leads` (0..1) → (N) `cotizaciones`
-- `clientes_globales` (0..1) → (N) `leads` vía `cliente_global_id`
+- `leads` (1) → (N) filas en `cotizaciones`, pero en **producto** solo **una cotización activa** por lead a la vez (`lead_id` en esa fila; las demás quedan libres tras vincular)
+- `clientes_globales` (0..1) → (N) `leads` vía `cliente_global_id` (previsto para unificar **personas** por RFC; no unifica leads ni cotizaciones)
+
+**Conceptos en la aplicación**
+
+| Concepto | Tabla / campo | Comportamiento |
+| -------- | ------------- | -------------- |
+| Persona / cliente | Nombre en `leads.nombre` hoy; a futuro `clientes_globales` + RFC | Puede haber **varios leads** (oportunidades) con el mismo nombre. |
+| Oportunidad (prospecto) | `leads` | Un trato en el embudo: etapa, estatus, agente, historial de etapas. |
+| Cotización | `cotizaciones` | Folio con parámetros financieros; puede existir sin lead (`lead_id` NULL). |
+| Cotización **activa** del lead | Única fila con `lead_id` = ese lead | La que el operador eligió al vincular; el tablero y `GET /leads` muestran esa. Al vincular otra, las previas del mismo lead se **liberan**. |
 
 **Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `tipo_persona` (`PM` | `PF` | `PFAE`, opcional), `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa; tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`; en `cotizaciones`: `folio` (AUTO_INCREMENT, FL-001…), `nombre_activo`, `marca`, `modelo`, `version`, `anio` (solo Automotriz), `tipo_arrendamiento` y parámetros del cotizador (`tasa_anual`, pago inicial/residual/comisión/seguro/GPS/servicios y flags `is_*`) para réplica y guardado fiel.
 
@@ -436,11 +448,11 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 
 | Método | Endpoint | Roles | Aislamiento por empresa |
 | ------ | -------- | ----- | ----------------------- |
-| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `tipo_persona`, `etapas_alcanzadas` (IDs de etapas con timestamp) y datos de la cotización vinculada (`cotizacion_id`, `cotizacion_folio`, `cotizacion_marca`, `cotizacion_modelo`, `cotizacion_version`, `cotizacion_anio`, etc.) |
+| GET | `/leads/:empresa_id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarEmpresaParam`; incluye `tipo_persona`, `nombre_etapa` (etapa actual vía `pipeline_stages`), estatus del catálogo y datos de la **cotización activa** (única con `lead_id` en ese prospecto; join por folio más reciente entre las vinculadas). Campos `cotizacion_*` en la respuesta. |
 | POST | `/leads` | mismos | `empresa_id` del body debe coincidir con el del usuario; acepta `tipo_persona` opcional (`PM`, `PF`, `PFAE`); registra timestamp de etapa inicial |
 | PUT | `/leads/:id` | mismos | `validarRecursoEmpresa` (empresa del lead); acepta `tipo_persona` opcional |
 | PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa`; mueve en el embudo y aplica reglas de `lead_etapas_historial` |
-| PUT | `/leads/:lead_id/vincular-cotizacion` | Ninguna (pública) | Desvincula cualquier cotización previa del lead y asigna la nueva; la cotización debe estar libre (`lead_id IS NULL`) |
+| PUT | `/leads/:lead_id/vincular-cotizacion` | Ninguna (pública) | **Cambiar cotización** en el tablero: deja un solo folio activo en el lead (`activarCotizacionEnLead`); las demás cotizaciones de ese lead quedan con `lead_id` NULL. Sincroniza `leads.valor` desde la cotización elegida. |
 | GET | `/estatus-leads/:empresa_id` | mismos | Catálogo por empresa; semilla `activo` / `cancelado` |
 | POST | `/estatus-leads` | `super_admin`, `admin_empresa` | Alta de estatus personalizado |
 | PUT | `/estatus-leads/:id` | mismos | Renombrar / color / flags (sistema: reglas fijas) |
@@ -489,7 +501,7 @@ mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
 | `cotizaciones` | `folio`, `nombre_activo`, `marca`, `modelo`, `version`, `anio` |
 | `cotizaciones` (§10) | `tipo_arrendamiento`, `tasa_anual`, `pago_inicial_valor`, `is_pago_inicial_pct`, `residual_valor`, `is_residual_pct`, `comision_valor`, `is_comision_pct`, `seguro_valor`, `is_seguro_contado`, `is_seguro_anual`, `gps_valor`, `is_gps_contado`, `servicios_valor` |
 
-**Complemento en runtime:** `lib/canales.js`, `lib/estatus-leads.js`, `lib/lead-etapas-historial.js`, `lib/leads.js` y `lib/cotizacion-guardar.js` (normalización e INSERT de cotizaciones; fallback legado si faltan columnas §10).
+**Complemento en runtime:** `lib/canales.js`, `lib/estatus-leads.js`, `lib/lead-etapas-historial.js`, `lib/leads.js`, `lib/cotizacion-guardar.js` y en `index.js` la función `activarCotizacionEnLead` (un folio activo por lead al vincular).
 
 **Tipo de persona del prospecto (`leads.tipo_persona`):**
 
@@ -516,12 +528,12 @@ Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer co
 
 | Método | Endpoint | Notas |
 | ------ | -------- | ----- |
-| POST | `/cotizaciones` | Crea cotización con **folio nuevo** (AUTO_INCREMENT). Body: activo (`tipo_arrendamiento`, `tipo_activo`, `marca`, `modelo`, `version`, `anio`, `nombre_activo`), totales (`porcentaje_vr`, `vr_calculado`, `pago_inicial`, rentas) y parámetros del formulario (§10). Normalización en `lib/cotizacion-guardar.js` (`anio` NULL fuera de Automotriz; GPS/trámites en 0 si `tipo_arrendamiento !== 'Automotriz'`). Si faltan columnas §10, INSERT legado sin parámetros (respuesta puede incluir `aviso`). |
-| GET | `/cotizaciones/lead/:lead_id` | Historial de cotizaciones de un lead |
+| POST | `/cotizaciones` | Crea cotización con **folio nuevo** (AUTO_INCREMENT). Body según §10 en `lib/cotizacion-guardar.js`. Si el body trae `lead_id`, tras el INSERT se ejecuta `activarCotizacionEnLead` (un folio activo; libera los demás del mismo lead). La SPA suele crear el folio sin `lead_id` y vincular después con `PUT …/vincular-lead`. |
+| GET | `/cotizaciones/lead/:lead_id` | Cotizaciones con `lead_id` = ese prospecto (en la práctica, el folio activo; las liberadas no aparecen porque tienen `lead_id` NULL) |
 | GET | `/cotizaciones/empresa/:empresa_id` | Listado por empresa; filtra por `usuario_id` si `rol=agente` en query |
-| GET | `/cotizaciones/buscar/:empresa_id` | Cotizaciones sin lead (`lead_id IS NULL`); `termino` filtra folio/activo (Kanban) |
+| GET | `/cotizaciones/buscar/:empresa_id` | Cotizaciones **libres** (`lead_id IS NULL`); `termino` filtra folio/activo (buscador del modal de lead) |
 | GET | `/cotizaciones/:id` | Detalle completo (réplica desde leads u otras pantallas). Definida **después** de rutas con segmento fijo (`lead`, `empresa`, `buscar`) |
-| PUT | `/cotizaciones/:id/vincular-lead` | Vincula una cotización existente a un lead (no crea folio nuevo) |
+| PUT | `/cotizaciones/:id/vincular-lead` | Asigna la cotización al lead como **folio activo** (no crea folio nuevo); libera las demás del mismo lead y actualiza `leads.valor` |
 
 **Tipos de arrendamiento y campos (`CotizadorView.jsx`, `frontend/src/lib/cotizacionFormulario.js`):**
 
@@ -538,22 +550,33 @@ Al cambiar el select de **Automotriz → Otro**, el front limpia marca/modelo/ve
 
 **Réplica de cotización:**
 
-- **Historial** (`CotizadorView`): botón *Replicar cotización* en cada fila (con o sin prospecto vinculado).
-- **Modal de lead** (`LeadsView`): enlace *Replicar cotización* cuando hay cotización asignada (incluye solo lectura); navega a `/cotizador` con `replicarCotizacionId`.
-- Carga vía `GET /cotizaciones/:id` o fila del historial; mapeo con `cotizacionAFormData(..., { paraReplicar: true })`: mismos parámetros financieros y de activo, **`lead_id`**, `nombre_cliente` y `tipo_persona` vacíos.
-- Aviso en formulario: parámetros copiados del folio origen; al guardar se asigna el **siguiente folio**; la cotización origen **no se modifica**.
-- Cotizaciones guardadas **antes** de la migración §10 pueden replicarse con defaults parciales (valor, plazo, VR %); sin §10 no hay réplica idéntica de tasa/seguro/GPS.
+- **Historial** (`CotizadorView`): menú ⋮ por fila → *Replicar cotización* (también con prospecto ya vinculado).
+- **Modal de lead** (`LeadsView`): enlace *Replicar cotización* cuando hay cotización asignada; navega a `/cotizador` con `replicarCotizacionId`.
+- `cotizacionAFormData(..., { paraReplicar: true })`: mismos parámetros financieros y de activo; **`nombre_cliente`**, `tipo_persona` y prospecto vacíos (el operador los asigna).
+- Al **Guardar DB** tras replicar: mismo modal que un alta normal (folio nuevo; la cotización origen no se modifica).
+- Cotizaciones **antes** de la migración §10 pueden replicarse con defaults parciales.
 
-**Guardar y prospecto:**
+**Guardar y prospecto (`ModalDestinoProspecto`):**
 
-- **Guardar DB** / **Generar PDF:** deshabilitados si hay errores de cálculo o faltan obligatorios.
-- **Guardar DB** abre un modal: solo cotización, **nueva oportunidad** (lead nuevo, aunque repita el nombre) o **vincular a oportunidad existente**. El select del formulario solo copia nombre/tipo de persona; no vincula al guardar.
-- **Un folio activo por lead:** al vincular (`PUT vincular-lead` o `PUT …/vincular-cotizacion`) las demás cotizaciones de ese lead quedan sin `lead_id`.
-- **Historial:** menú ⋮ por fila — replicar, nueva oportunidad o vincular a existente (misma lógica que el modal al guardar).
-- **Replicar** deja nombre y prospecto vacíos; el operador asigna el cliente y decide el destino al guardar o desde el historial.
+- **Guardar DB** / **Generar PDF:** deshabilitados si hay errores de cálculo o faltan obligatorios (incluido nombre de cliente).
+- Flujo **Guardar DB:** (1) `POST /cotizaciones` sin `lead_id`; (2) según elección del modal, opcionalmente `POST /leads` (nueva oportunidad) y `PUT /cotizaciones/:id/vincular-lead`.
+- Opciones del modal:
+  - **Solo guardar cotización** — folio en historial; sin tarjeta en el tablero hasta vincular después.
+  - **Nueva oportunidad** — `POST /leads` siempre crea fila nueva (aunque el nombre ya exista; aviso si hay homónimos).
+  - **Vincular a oportunidad existente** — selector con nombre, folio activo, etapa y estatus; deja ese folio como único activo del lead.
+- Select **Copiar datos de oportunidad existente** en el formulario: lista **un nombre por persona** (aunque haya varias oportunidades homónimas); solo rellena nombre y `tipo_persona` del lead más reciente con ese nombre; **no** envía `lead_id` al guardar.
+- **Historial (menú ⋮):** *Replicar*; *Nueva oportunidad* (pide nombre si hace falta); *Vincular a oportunidad existente* — misma regla de folio activo, sin crear folio nuevo.
+- **Tablero:** *Cambiar cotización* en el modal del lead usa `PUT /leads/:id/vincular-cotizacion` (solo cotizaciones libres en el buscador).
+
+**Un folio activo por lead (backend):**
+
+- Función `activarCotizacionEnLead` en `index.js`: pone `lead_id` NULL en todas las cotizaciones del lead y asigna la elegida; sincroniza `leads.valor`.
+- Usada en `POST /cotizaciones` (si viene `lead_id`), `PUT /cotizaciones/:id/vincular-lead` y `PUT /leads/:lead_id/vincular-cotizacion`.
 
 **Archivos clave:**
 
+- `frontend/src/components/ModalDestinoProspecto.jsx` — modal de destino al guardar o desde historial.
+- `frontend/src/lib/destinoProspectoCotizacion.js` — alta de oportunidad, `vincular-lead`, etiqueta del modal de destino y deduplicación de nombres en el cotizador.
 - `frontend/src/lib/cotizacionFormulario.js` — estado del formulario ↔ BD y payload de guardado.
 - `lib/cotizacion-guardar.js` — normalización e INSERT (completo / legado).
 

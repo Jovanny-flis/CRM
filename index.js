@@ -720,6 +720,7 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             e.permite_mover as estatus_permite_mover,
             e.incluir_en_suma as estatus_incluir_en_suma,
             u.nombre as agente_nombre,
+            ps.nombre_etapa,
             
             -- DATOS COMPLETOS DE LA COTIZACIÓN (última vinculada al lead)
             c.id as cotizacion_id,
@@ -740,6 +741,7 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             c.tipo_renta as cotizacion_tipo_renta
             
         FROM leads l
+        LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
         LEFT JOIN lead_estatus e ON l.estatus_id = e.id
         LEFT JOIN usuarios u ON l.usuario_id = u.id
         LEFT JOIN cotizaciones c ON c.id = (
