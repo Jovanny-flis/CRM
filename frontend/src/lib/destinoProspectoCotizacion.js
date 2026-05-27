@@ -78,3 +78,17 @@ export const crearLeadOportunidad = async (api, {
 export const vincularCotizacionActiva = async (api, cotizacionId, leadId) => {
   await api.put(`/cotizaciones/${cotizacionId}/vincular-lead`, { lead_id: leadId });
 };
+
+/** Prospecto con folio congelado (cancelado o estatus con bloqueo). */
+export const leadBloqueaCotizacion = (lead) => {
+  if (!lead) return false;
+  if (lead.estatus_codigo === 'cancelado') return true;
+  return lead.estatus_bloquea_cotizacion === 1 || lead.estatus_bloquea_cotizacion === true;
+};
+
+/** Estatus de catálogo con congelamiento de folio. */
+export const estatusBloqueaCotizacion = (estatus) => {
+  if (!estatus) return false;
+  if (estatus.codigo === 'cancelado') return true;
+  return estatus.bloquea_cotizacion === 1 || estatus.bloquea_cotizacion === true;
+};

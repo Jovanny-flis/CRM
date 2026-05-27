@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS `lead_estatus` (
   `color_hex` varchar(7) DEFAULT NULL COMMENT 'NULL = sin color (neutro)',
   `incluir_en_suma` tinyint(1) NOT NULL DEFAULT 1,
   `permite_mover` tinyint(1) NOT NULL DEFAULT 1,
+  `bloquea_cotizacion` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Congela folio: sin vincular ni cambiar cotización',
   `es_sistema` tinyint(1) NOT NULL DEFAULT 0,
   `orden` int(11) NOT NULL DEFAULT 0,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
@@ -146,6 +147,11 @@ CREATE TABLE IF NOT EXISTS `lead_estatus` (
   KEY `idx_lead_estatus_empresa` (`empresa_id`),
   CONSTRAINT `fk_lead_estatus_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CALL crm_add_column_if_missing('lead_estatus', 'bloquea_cotizacion',
+  "tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Congela folio: sin vincular ni cambiar cotización' AFTER `permite_mover`");
+
+UPDATE `lead_estatus` SET `bloquea_cotizacion` = 1 WHERE `codigo` = 'cancelado';
 
 -- -----------------------------------------------------------------------------
 -- 4) leads.estatus_id
@@ -217,9 +223,9 @@ DROP PROCEDURE IF EXISTS `crm_dml_leads_medio_contacto_directo`;
 -- -----------------------------------------------------------------------------
 INSERT INTO `lead_estatus` (
   `id`, `empresa_id`, `codigo`, `nombre`, `color_hex`,
-  `incluir_en_suma`, `permite_mover`, `es_sistema`, `orden`
+  `incluir_en_suma`, `permite_mover`, `bloquea_cotizacion`, `es_sistema`, `orden`
 )
-SELECT UUID(), e.`id`, 'activo', 'Activo', NULL, 1, 1, 1, 0
+SELECT UUID(), e.`id`, 'activo', 'Activo', NULL, 1, 1, 0, 1, 0
 FROM `empresas` e
 WHERE NOT EXISTS (
   SELECT 1 FROM `lead_estatus` le
@@ -228,9 +234,9 @@ WHERE NOT EXISTS (
 
 INSERT INTO `lead_estatus` (
   `id`, `empresa_id`, `codigo`, `nombre`, `color_hex`,
-  `incluir_en_suma`, `permite_mover`, `es_sistema`, `orden`
+  `incluir_en_suma`, `permite_mover`, `bloquea_cotizacion`, `es_sistema`, `orden`
 )
-SELECT UUID(), e.`id`, 'cancelado', 'Cancelado', '#94a3b8', 0, 0, 1, 9999
+SELECT UUID(), e.`id`, 'cancelado', 'Cancelado', '#94a3b8', 0, 0, 1, 1, 9999
 FROM `empresas` e
 WHERE NOT EXISTS (
   SELECT 1 FROM `lead_estatus` le

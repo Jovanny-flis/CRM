@@ -4,6 +4,7 @@ import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
+import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
 
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
@@ -126,7 +127,7 @@ function LeadsView() {
 
   // CARGA AUTOMÁTICA DE COTIZACIONES AL ABRIR EL BUSCADOR
   useEffect(() => {
-    if (mostrarBuscadorCotizacion && !modoSoloLectura) {
+    if (mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal()) {
       const cargarInicial = async () => {
         setBuscandoCotizaciones(true);
         try {
@@ -160,6 +161,13 @@ function LeadsView() {
   const esLeadEditable = (lead) => !esLeadCancelado(lead);
   const incluyeEnSuma = (lead) => lead.estatus_incluir_en_suma === 1 || lead.estatus_incluir_en_suma === true;
 
+  const bloqueaCotizacionEnModal = () => {
+    if (!leadEditando) return false;
+    if (leadBloqueaCotizacion(leadEditando)) return true;
+    const est = estatusList.find((e) => String(e.id) === String(formData.estatus_id));
+    return estatusBloqueaCotizacion(est);
+  };
+
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
   const vaACancelarEnFormulario = formData.estatus_id && String(formData.estatus_id) === String(estatusCanceladoId);
 
@@ -192,7 +200,8 @@ function LeadsView() {
     setMotivoDesactivacion('');
     setMostrarAvisoCancelacion(false);
     setIsModalOpen(true);
-    setMostrarBuscadorCotizacion(!leadCompleto.cotizacion_id); 
+    const congelaFolio = leadBloqueaCotizacion(leadCompleto);
+    setMostrarBuscadorCotizacion(!congelaFolio && !leadCompleto.cotizacion_id);
   };
 
   const handleCambioEstatus = (nuevoEstatusId) => {
@@ -297,7 +306,7 @@ function LeadsView() {
   };
 
   const asignarCotizacion = async (cotizacionId) => {
-    if (modoSoloLectura || !leadEditando || !leadEditando.id) return;
+    if (modoSoloLectura || !leadEditando || !leadEditando.id || bloqueaCotizacionEnModal()) return;
     
     try {
       await api.put(`/leads/${leadEditando.id}/vincular-cotizacion`, { cotizacion_id: cotizacionId });
@@ -984,7 +993,7 @@ function LeadsView() {
                             Replicar cotización
                           </button>
                         )}
-                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && (
+                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal() && (
                           <button
                             type="button"
                             onClick={() => setMostrarBuscadorCotizacion(true)}
@@ -1078,6 +1087,21 @@ function LeadsView() {
                           </div>
 
                         </div>
+
+                        {bloqueaCotizacionEnModal() && (
+                          <p className="mt-4 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                            Folio congelado: no se puede vincular ni cambiar cotización en este estatus.
+                          </p>
+                        )}
+                      </div>
+                    ) : bloqueaCotizacionEnModal() ? (
+                      <div className="flex-1 flex flex-col items-center justify-center text-center opacity-70 px-4">
+                        <FileText size={48} className="text-slate-400 mb-3" />
+                        <p className="text-sm font-medium text-slate-600">
+                          {leadEditando.cotizacion_id
+                            ? 'Este prospecto tiene el folio congelado en su estatus actual.'
+                            : 'Este prospecto no puede recibir cotización: el folio está congelado en su estatus.'}
+                        </p>
                       </div>
                     ) : (
                       
@@ -1171,7 +1195,7 @@ function LeadsView() {
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
-              Si guardas con estatus cancelado, este lead no podrá cambiar de estatus, de etapa, ni editarse de nuevo.
+              Si guardas con estatus cancelado, este lead no podrá cambiar de estatus, de etapa, ni editarse de nuevo. Tampoco se podrá vincular ni cambiar su cotización.
             </p>
             <button
               type="button"

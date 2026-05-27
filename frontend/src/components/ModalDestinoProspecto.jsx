@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { etiquetaLeadOpcion, leadsMismoNombre } from '../lib/destinoProspectoCotizacion';
+import { etiquetaLeadOpcion, leadBloqueaCotizacion, leadsMismoNombre } from '../lib/destinoProspectoCotizacion';
 
 /**
  * @typedef {'solo' | 'nuevo' | 'existente'} TipoDestino
@@ -24,11 +24,13 @@ const ModalDestinoProspecto = ({
   const [nombreNuevo, setNombreNuevo] = useState(nombreInicial);
 
   const coincidencias = leadsMismoNombre(leads, nombreCliente || nombreInicial);
+  const leadsVinculables = leads.filter((l) => !leadBloqueaCotizacion(l));
+  const leadsCongelados = leads.length - leadsVinculables.length;
 
   useEffect(() => {
     if (!abierto) return;
     setPaso(pasoInicial);
-    setLeadIdElegido(leads[0]?.id || '');
+    setLeadIdElegido(leadsVinculables[0]?.id || '');
     setNombreNuevo(nombreInicial || nombreCliente || '');
   }, [abierto, nombreInicial, nombreCliente, pasoInicial, leads]);
 
@@ -60,17 +62,22 @@ const ModalDestinoProspecto = ({
   };
 
   const irExistente = () => {
-    if (!leads.length) {
-      alert('No hay oportunidades en el tablero para vincular.');
+    if (!leadsVinculables.length) {
+      alert('No hay oportunidades disponibles para vincular (las existentes tienen el folio congelado).');
       return;
     }
-    setLeadIdElegido(leads[0]?.id || '');
+    setLeadIdElegido(leadsVinculables[0]?.id || '');
     setPaso('existente');
   };
 
   const confirmarExistente = () => {
     if (!leadIdElegido) {
       alert('Selecciona una oportunidad.');
+      return;
+    }
+    const elegido = leadsVinculables.find((l) => l.id === leadIdElegido);
+    if (!elegido) {
+      alert('Esa oportunidad tiene el folio congelado y no acepta vinculación.');
       return;
     }
     confirmar({ tipo: 'existente', leadId: leadIdElegido });
@@ -127,7 +134,7 @@ const ModalDestinoProspecto = ({
             <button
               type="button"
               onClick={irExistente}
-              disabled={!leads.length}
+              disabled={!leadsVinculables.length}
               className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm font-semibold text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Vincular a oportunidad existente
@@ -135,6 +142,12 @@ const ModalDestinoProspecto = ({
                 Esta cotización será el folio activo de ese prospecto; los demás folios del mismo lead se liberan.
               </span>
             </button>
+
+            {leadsCongelados > 0 && (
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                {leadsCongelados} oportunidad(es) no aparecen porque tienen el folio congelado.
+              </p>
+            )}
 
             <button
               type="button"
@@ -188,7 +201,7 @@ const ModalDestinoProspecto = ({
               onChange={(e) => setLeadIdElegido(e.target.value)}
               className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm"
             >
-              {leads.map((l) => (
+              {leadsVinculables.map((l) => (
                 <option key={l.id} value={l.id}>
                   {etiquetaLeadOpcion(l)}
                 </option>

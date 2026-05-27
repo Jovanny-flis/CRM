@@ -29,6 +29,7 @@ const {
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
 const { normalizarTipoPersona } = require('./lib/leads');
 const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
+const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -83,6 +84,7 @@ const sincronizarValorLeadDesdeCotizacion = async (db, leadId, cotizacionId) => 
 
 /** Un solo folio activo por lead; las demás cotizaciones del mismo lead quedan sin vincular. */
 const activarCotizacionEnLead = async (db, leadId, cotizacionId) => {
+    await assertPuedeVincularCotizacionEnLead(db, leadId, cotizacionId);
     await db.query('UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?', [leadId]);
     await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [leadId, cotizacionId]);
     await sincronizarValorLeadDesdeCotizacion(db, leadId, cotizacionId);
@@ -521,6 +523,7 @@ app.post('/api/estatus-leads',
             color_hex,
             incluir_en_suma,
             permite_mover,
+            bloquea_cotizacion,
         } = req.body;
         const nombreLimpio = (nombre || '').trim();
 
@@ -545,8 +548,8 @@ app.post('/api/estatus-leads',
 
             await db.query(
                 `INSERT INTO lead_estatus
-                 (id, empresa_id, codigo, nombre, color_hex, incluir_en_suma, permite_mover, es_sistema, orden)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                 (id, empresa_id, codigo, nombre, color_hex, incluir_en_suma, permite_mover, bloquea_cotizacion, es_sistema, orden)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
                 [
                     id,
                     empresa_id,
@@ -555,6 +558,7 @@ app.post('/api/estatus-leads',
                     color,
                     incluir_en_suma ? 1 : 0,
                     permite_mover ? 1 : 0,
+                    bloquea_cotizacion ? 1 : 0,
                     orden,
                 ],
             );
@@ -573,7 +577,7 @@ app.put('/api/estatus-leads/:id',
     validarRecursoEmpresa('SELECT empresa_id FROM lead_estatus WHERE id = ?'),
     async (req, res) => {
         const { id } = req.params;
-        const { nombre, color_hex, incluir_en_suma, permite_mover } = req.body;
+        const { nombre, color_hex, incluir_en_suma, permite_mover, bloquea_cotizacion } = req.body;
         const nombreLimpio = (nombre || '').trim();
 
         if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del estatus es obligatorio.' });
@@ -601,13 +605,14 @@ app.put('/api/estatus-leads/:id',
 
             await db.query(
                 `UPDATE lead_estatus
-                 SET nombre = ?, color_hex = ?, incluir_en_suma = ?, permite_mover = ?
+                 SET nombre = ?, color_hex = ?, incluir_en_suma = ?, permite_mover = ?, bloquea_cotizacion = ?
                  WHERE id = ?`,
                 [
                     nombreLimpio,
                     color,
                     incluir_en_suma ? 1 : 0,
                     permite_mover ? 1 : 0,
+                    bloquea_cotizacion ? 1 : 0,
                     id,
                 ],
             );
@@ -692,6 +697,7 @@ const SQL_LEADS_CON_ESTATUS = `
            e.color_hex AS estatus_color,
            e.incluir_en_suma AS estatus_incluir_en_suma,
            e.permite_mover AS estatus_permite_mover,
+           e.bloquea_cotizacion AS estatus_bloquea_cotizacion,
            e.es_sistema AS estatus_es_sistema,
            (SELECT GROUP_CONCAT(h.stage_id)
             FROM lead_etapas_historial h
@@ -719,6 +725,7 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             e.codigo as estatus_codigo,
             e.permite_mover as estatus_permite_mover,
             e.incluir_en_suma as estatus_incluir_en_suma,
+            e.bloquea_cotizacion as estatus_bloquea_cotizacion,
             u.nombre as agente_nombre,
             ps.nombre_etapa,
             
@@ -934,7 +941,7 @@ app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
         res.json({ mensaje: 'Cotización asignada con éxito' });
     } catch (error) {
         console.error('❌ Error vinculando cotización al lead:', error.message);
-        res.status(500).json({ error: error.message || 'Error vinculando la cotización' });
+        res.status(error.status || 500).json({ error: error.message || 'Error vinculando la cotización' });
     }
 });
 
@@ -1188,12 +1195,8 @@ app.post('/api/cotizaciones', async (req, res) => {
         const { modo } = await guardarCotizacion(pool, nuevaCotizacionId, datos);
 
         if (lead_id) {
-            try {
-                const db = pool.promise();
-                await activarCotizacionEnLead(db, lead_id, nuevaCotizacionId);
-            } catch (syncErr) {
-                console.error('❌ Error activando cotización en el lead:', syncErr.message);
-            }
+            const db = pool.promise();
+            await activarCotizacionEnLead(db, lead_id, nuevaCotizacionId);
         }
 
         const respuesta = { mensaje: '✅ Cotización guardada con éxito', id: nuevaCotizacionId };
@@ -1203,7 +1206,7 @@ app.post('/api/cotizaciones', async (req, res) => {
         res.status(201).json(respuesta);
     } catch (error) {
         console.error('❌ ERROR AL GUARDAR COTIZACIÓN:', error.sqlMessage || error.message || error);
-        res.status(500).json({
+        res.status(error.status || 500).json({
             error: error.sqlMessage || error.message || 'Error al guardar en BD',
         });
     }
@@ -1273,7 +1276,7 @@ app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
         res.status(200).json({ mensaje: '✅ Cotización vinculada al prospecto' });
     } catch (error) {
         console.error('❌ Error vinculando cotización al prospecto:', error.message);
-        res.status(500).json({ error: error.message || 'Error al vincular cotización' });
+        res.status(error.status || 500).json({ error: error.message || 'Error al vincular cotización' });
     }
 });
 
