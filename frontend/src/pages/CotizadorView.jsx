@@ -737,7 +737,7 @@ const CotizadorView = () => {
             
             <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                Copiar datos de oportunidad existente (opcional)
+                Copiar datos de lead existente (opcional)
               </label>
               <select 
                 value={referenciaLeadId} 
@@ -750,7 +750,7 @@ const CotizadorView = () => {
                 ))}
               </select>
               <p className="text-[11px] text-slate-500 mt-1">
-                No vincula al guardar. Al pulsar Guardar DB elegirás nueva oportunidad, existente o solo cotización.
+                No vincula al guardar. Al pulsar Guardar DB elegirás nuevo lead, existente o solo cotización.
               </p>
             </div>
 
@@ -1234,7 +1234,7 @@ const CotizadorView = () => {
               }}
               className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
             >
-              Nueva oportunidad
+              Nuevo lead
             </button>
             <button
               type="button"
@@ -1249,7 +1249,7 @@ const CotizadorView = () => {
               }}
               className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
             >
-              Vincular a oportunidad existente
+              Vincular a lead existente
             </button>
           </div>
         )}
@@ -1274,8 +1274,8 @@ const CotizadorView = () => {
         titulo={modalDestino?.modo === 'historial' ? 'Vincular cotización a prospecto' : '¿Cómo guardar la cotización?'}
         subtitulo={
           modalDestino?.modo === 'historial'
-            ? `Folio FL-${String(modalDestino?.cotizacion?.folio || 0).padStart(3, '0')}. Solo un folio activo por oportunidad; los demás se liberan.`
-            : `Cliente: ${formData.nombre_cliente}. Elige si creas una oportunidad nueva, vinculas a una existente o solo guardas el folio.`
+            ? `Folio FL-${String(modalDestino?.cotizacion?.folio || 0).padStart(3, '0')}. Solo un folio activo por lead; los demás se liberan.`
+            : `Cliente: ${formData.nombre_cliente}. Elige si creas un lead nuevo, vinculas a uno existente o solo guardas el folio.`
         }
         modo={modalDestino?.modo === 'historial' ? 'historial' : 'guardar'}
         nombreCliente={formData.nombre_cliente}

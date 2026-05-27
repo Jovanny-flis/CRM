@@ -340,7 +340,7 @@ function AdminEstatusLeads({ empresaId }) {
               checked={formNuevo.incluir_en_suma}
               onChange={(e) => setFormNuevo({ ...formNuevo, incluir_en_suma: e.target.checked })}
             />
-            Mostrar en suma del bin
+            Mostrar en suma de la etapa
           </label>
           <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
             <input
@@ -348,7 +348,7 @@ function AdminEstatusLeads({ empresaId }) {
               checked={formNuevo.permite_mover}
               onChange={(e) => setFormNuevo({ ...formNuevo, permite_mover: e.target.checked })}
             />
-            Permite mover en embudo
+            Permite mover de etapa
           </label>
         </div>
         <button type="submit" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700">
