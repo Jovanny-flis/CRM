@@ -1508,29 +1508,6 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
 
 // Obtener una cotización por ID (réplica / detalle; después de rutas con segmento fijo)
 app.get('/api/cotizaciones/:id', (req, res) => {
-
-// Obtener solo las cotizaciones DISPONIBLES (sin lead asignado)
-app.get('/api/cotizaciones/disponibles/:empresa_id', (req, res) => {
-    const { empresa_id } = req.params;
-    
-    // Buscamos las que pertenezcan a la empresa y su lead_id sea NULL
-    const query = `
-        SELECT * FROM cotizaciones 
-        WHERE empresa_id = ? AND lead_id IS NULL 
-        ORDER BY fecha_creacion DESC
-    `;
-    
-    pool.query(query, [empresa_id], (error, resultados) => {
-        if (error) {
-            console.error("❌ ERROR AL BUSCAR DISPONIBLES:", error);
-            return res.status(500).json({ error: "Error al buscar cotizaciones disponibles" });
-        }
-        res.status(200).json(resultados);
-    });
-});
-
-// 4. Vincular una cotización existente a un prospecto
-app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
     const { id } = req.params;
     pool.query('SELECT * FROM cotizaciones WHERE id = ?', [id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });

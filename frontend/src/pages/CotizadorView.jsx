@@ -272,7 +272,7 @@ const CotizadorView = () => {
       } else if (destino.tipo === 'existente') {
         finalLeadId = destino.leadId;
       }
-
+        formData.usuario_id = usuarioLogueado.id;
       const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
         empresaId,
         usuarioId: usuarioLogueado.id,
