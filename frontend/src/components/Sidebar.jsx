@@ -22,6 +22,13 @@ const Sidebar = () => {
       icon: '🚀', 
       roles: ['super_admin', 'admin_empresa', 'supervisor', 'agente'] 
     },
+    // 👇 AQUÍ AGREGAMOS LA LISTA MAESTRA TIPO EXCEL 👇
+    { 
+      name: 'Directorio Maestro', 
+      path: '/maestro-leads', 
+      icon: '📋', 
+      roles: ['super_admin', 'admin_empresa', 'supervisor', 'agente', 'agente_cotizador'] 
+    },
     // 👇 AQUÍ AGREGAMOS EL COTIZADOR 👇
     { 
       name: 'Cotizador', 

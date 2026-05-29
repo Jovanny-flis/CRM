@@ -31,6 +31,7 @@ const { normalizarTipoPersona } = require('./lib/leads');
 const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
 const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
 const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
+const reporteMaestro = require('./lib/reporteMaestro');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -58,6 +59,8 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+
+app.use(reporteMaestro);
 
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
 // super_admin pasa siempre. El resto debe coincidir con su empresa_id.

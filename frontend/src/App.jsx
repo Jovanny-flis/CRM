@@ -11,6 +11,8 @@ import DashboardView from './pages/DashboardView';
 import AvisoSesionModal from './components/AvisoSesionModal';
 import { useGestionSesion } from './hooks/useGestionSesion';
 import { CLAVE_USUARIO } from './lib/sesion';
+import ListaMaestraLeads from './pages/ListaMaestraLeads'; // Ajusta la ruta a tu carpeta
+
 
 // 🛡️ NUEVO: ESTE ES NUESTRO CADENERO DEL FRONTEND
 const RutaProtegida = ({ rolesPermitidos, rolActual, children }) => {
@@ -73,7 +75,7 @@ function App() {
           <Route path="/" element={<DashboardView />} />
           <Route path="/leads" element={<LeadsView />} />
           <Route path="/cotizador" element={<CotizadorView />} />
-          
+          <Route path="/maestro-leads" element={<ListaMaestraLeads />} />
           {/* 🛡️ Rutas PROTEGIDAS (Ejemplo: Solo admins ven Empresas y Agentes) */}
           <Route path="/empresas" element={
             <RutaProtegida rolesPermitidos={['super_admin']} rolActual={usuario.rol}>
