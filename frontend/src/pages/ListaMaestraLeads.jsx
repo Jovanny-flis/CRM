@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api'; // Conector Axios
+import { CLAVE_USUARIO } from '../lib/sesion'; // Ajusta la ruta si es necesario
 
 const ListaMaestraLeads = () => {
   const [datos, setDatos] = useState([]);
@@ -10,23 +11,22 @@ const ListaMaestraLeads = () => {
   useEffect(() => {
     const obtenerDatos = async () => {
       try {
-        // 1. Recuperamos los datos REALES del usuario que inició sesión
-        let empresaId = 1;
-        let usuarioId = 1;
-        let role = 'administrador';
+// 1. Recuperamos los datos REALES usando la clave oficial de tu sistema
+     let empresaId = 0;
+     let usuarioId = 0;
+     let role = '';
 
-        // Buscamos la sesión guardada (ajustado a la lógica de tu Sidebar)
-        const usuarioGuardado = localStorage.getItem('usuario_flising_crm') || localStorage.getItem('flising_user') || localStorage.getItem('usuario');
-        if (usuarioGuardado) {
-          try {
-            const userObj = JSON.parse(usuarioGuardado);
-            empresaId = userObj.empresa_id || 1;
-            usuarioId = userObj.id || 1;
-            role = userObj.rol || userObj.role || 'administrador';
-          } catch (e) {
-            console.warn("Error leyendo sesión", e);
-          }
-        }
+     const usuarioGuardado = localStorage.getItem(CLAVE_USUARIO); // Usamos tu clave oficial
+     if (usuarioGuardado) {
+       try {
+         const userObj = JSON.parse(usuarioGuardado);
+         empresaId = userObj.empresa_id || 0;
+         usuarioId = userObj.id || 0;
+         role = userObj.rol || userObj.role || '';
+       } catch (e) {
+         console.warn("Error leyendo sesión", e);
+       }
+     }
 
         // 2. Usamos 'api.get' en lugar de 'fetch'
         const respuesta = await api.get(`/reportes/maestro-leads?empresa_id=${empresaId}&usuario_id=${usuarioId}&role=${role}`);
