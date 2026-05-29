@@ -222,6 +222,7 @@ function AgentesView() {
                     onChange={(e) => setFormData({...formData, rol: e.target.value, supervisor_id: ''})} 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none transition-all appearance-none"
                   >
+                    <option value="agente_cotizador">Agente Cotizador (Solo usa el Cotizador)</option>
                     <option value="agente">Agente (Solo ve sus leads)</option>
                     <option value="supervisor">Supervisor (Ve todo el equipo)</option>
                     <option value="admin_empresa">Administrador (Control total de la empresa)</option>
@@ -229,7 +230,8 @@ function AgentesView() {
                   </select>
                 </div>
 
-                {formData.rol === 'agente' && (
+{/* Permitimos asignar supervisor tanto a agentes como a agentes cotizadores */}
+                {(formData.rol === 'agente' || formData.rol === 'agente_cotizador') && (
                   <div className="animate-in slide-in-from-top-2 duration-300">
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asignar a Supervisor</label>
                     <select 

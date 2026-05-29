@@ -34,7 +34,7 @@ const Sidebar = () => {
       name: 'Cotizador', 
       path: '/cotizador', 
       icon: '🧮', 
-      roles: ['super_admin', 'admin_empresa', 'supervisor', 'agente'] 
+      roles: ['super_admin', 'admin_empresa', 'supervisor', 'agente','agente_cotizador'] 
     },
     { 
       name: 'Agentes', 
