@@ -27,6 +27,10 @@ const {
     esCancelado,
 } = require('./lib/estatus-leads');
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
+const { normalizarTipoPersona } = require('./lib/leads');
+const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
+const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
+const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -68,6 +72,34 @@ const puedeOperarEnEmpresa = (usuarioCRM, empresaIdObjetivo) => {
 const valorEstimadoValido = (valor) => {
     const n = Number(valor);
     return Number.isFinite(n) && n > 0;
+};
+
+const sincronizarValorLeadDesdeCotizacion = async (db, leadId, cotizacionId) => {
+    const [filas] = await db.query(
+        'SELECT valor_activo FROM cotizaciones WHERE id = ? LIMIT 1',
+        [cotizacionId],
+    );
+    if (!filas.length || filas[0].valor_activo == null) return;
+    await db.query('UPDATE leads SET valor = ? WHERE id = ?', [filas[0].valor_activo, leadId]);
+};
+
+/** Un solo folio activo por lead; las demás cotizaciones del mismo lead quedan sin vincular. */
+const activarCotizacionEnLead = async (db, leadId, cotizacionId) => {
+    await assertPuedeVincularCotizacionEnLead(db, leadId, cotizacionId);
+    await db.query('UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?', [leadId]);
+    await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [leadId, cotizacionId]);
+    await sincronizarValorLeadDesdeCotizacion(db, leadId, cotizacionId);
+};
+
+const obtenerValorActivoCotizacionLead = async (db, leadId) => {
+    const [filas] = await db.query(
+        `SELECT valor_activo FROM cotizaciones
+         WHERE lead_id = ?
+         ORDER BY folio DESC
+         LIMIT 1`,
+        [leadId],
+    );
+    return filas.length ? filas[0].valor_activo : null;
 };
 
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
@@ -492,6 +524,7 @@ app.post('/api/estatus-leads',
             color_hex,
             incluir_en_suma,
             permite_mover,
+            bloquea_cotizacion,
         } = req.body;
         const nombreLimpio = (nombre || '').trim();
 
@@ -516,8 +549,8 @@ app.post('/api/estatus-leads',
 
             await db.query(
                 `INSERT INTO lead_estatus
-                 (id, empresa_id, codigo, nombre, color_hex, incluir_en_suma, permite_mover, es_sistema, orden)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                 (id, empresa_id, codigo, nombre, color_hex, incluir_en_suma, permite_mover, bloquea_cotizacion, es_sistema, orden)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
                 [
                     id,
                     empresa_id,
@@ -526,6 +559,7 @@ app.post('/api/estatus-leads',
                     color,
                     incluir_en_suma ? 1 : 0,
                     permite_mover ? 1 : 0,
+                    bloquea_cotizacion ? 1 : 0,
                     orden,
                 ],
             );
@@ -544,7 +578,7 @@ app.put('/api/estatus-leads/:id',
     validarRecursoEmpresa('SELECT empresa_id FROM lead_estatus WHERE id = ?'),
     async (req, res) => {
         const { id } = req.params;
-        const { nombre, color_hex, incluir_en_suma, permite_mover } = req.body;
+        const { nombre, color_hex, incluir_en_suma, permite_mover, bloquea_cotizacion } = req.body;
         const nombreLimpio = (nombre || '').trim();
 
         if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del estatus es obligatorio.' });
@@ -572,13 +606,14 @@ app.put('/api/estatus-leads/:id',
 
             await db.query(
                 `UPDATE lead_estatus
-                 SET nombre = ?, color_hex = ?, incluir_en_suma = ?, permite_mover = ?
+                 SET nombre = ?, color_hex = ?, incluir_en_suma = ?, permite_mover = ?, bloquea_cotizacion = ?
                  WHERE id = ?`,
                 [
                     nombreLimpio,
                     color,
                     incluir_en_suma ? 1 : 0,
                     permite_mover ? 1 : 0,
+                    bloquea_cotizacion ? 1 : 0,
                     id,
                 ],
             );
@@ -663,6 +698,7 @@ const SQL_LEADS_CON_ESTATUS = `
            e.color_hex AS estatus_color,
            e.incluir_en_suma AS estatus_incluir_en_suma,
            e.permite_mover AS estatus_permite_mover,
+           e.bloquea_cotizacion AS estatus_bloquea_cotizacion,
            e.es_sistema AS estatus_es_sistema,
            (SELECT GROUP_CONCAT(h.stage_id)
             FROM lead_etapas_historial h
@@ -672,10 +708,16 @@ const SQL_LEADS_CON_ESTATUS = `
     LEFT JOIN lead_estatus e ON l.estatus_id = e.id
 `;
 
-app.get('/api/leads/:empresa_id', (req, res) => {
+app.get('/api/leads/:empresa_id', async (req, res) => {
     const { empresa_id } = req.params;
-    
-    // Consulta actualizada para traer ABSOLUTAMENTE TODOS los datos de la cotización
+
+    try {
+        await asegurarCatalogoEstatus(pool, empresa_id);
+    } catch (errSeed) {
+        console.error('❌ Error al sembrar estatus (leads):', errSeed.message);
+        return res.status(500).json({ error: 'No se pudo inicializar estatus de prospectos.' });
+    }
+
     const query = `
         SELECT 
             l.*, 
@@ -684,15 +726,18 @@ app.get('/api/leads/:empresa_id', (req, res) => {
             e.codigo as estatus_codigo,
             e.permite_mover as estatus_permite_mover,
             e.incluir_en_suma as estatus_incluir_en_suma,
+            e.bloquea_cotizacion as estatus_bloquea_cotizacion,
             u.nombre as agente_nombre,
+            ps.nombre_etapa,
             
-            -- DATOS COMPLETOS DE LA COTIZACIÓN
+            -- DATOS COMPLETOS DE LA COTIZACIÓN (última vinculada al lead)
             c.id as cotizacion_id,
             c.folio as cotizacion_folio,
             c.tipo_activo as cotizacion_tipo_activo,
             c.nombre_activo as cotizacion_activo,
             c.marca as cotizacion_marca, 
-            c.modelo as cotizacion_modelo, 
+            c.modelo as cotizacion_modelo,
+            c.version as cotizacion_version,
             c.anio as cotizacion_anio,
             c.valor_activo as cotizacion_valor_activo,
             c.plazo as cotizacion_plazo,
@@ -704,9 +749,15 @@ app.get('/api/leads/:empresa_id', (req, res) => {
             c.tipo_renta as cotizacion_tipo_renta
             
         FROM leads l
+        LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
         LEFT JOIN lead_estatus e ON l.estatus_id = e.id
         LEFT JOIN usuarios u ON l.usuario_id = u.id
-        LEFT JOIN cotizaciones c ON c.lead_id = l.id
+        LEFT JOIN cotizaciones c ON c.id = (
+            SELECT c2.id FROM cotizaciones c2
+            WHERE c2.lead_id = l.id
+            ORDER BY c2.folio DESC
+            LIMIT 1
+        )
         WHERE l.empresa_id = ?
         ORDER BY l.created_at DESC
     `;
@@ -722,7 +773,7 @@ app.get('/api/leads/:empresa_id', (req, res) => {
 
 // Crear un nuevo prospecto (Lead)
 app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), async (req, res) => {
-    const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id } = req.body;
+    const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id, tipo_persona } = req.body;
 
     if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
         return res.status(403).json({ error: 'No puedes crear leads en otra empresa.' });
@@ -730,6 +781,11 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
 
     if (!valorEstimadoValido(valor)) {
         return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
+    }
+
+    const tipoPersonaNormalizado = normalizarTipoPersona(tipo_persona);
+    if (tipoPersonaNormalizado && typeof tipoPersonaNormalizado === 'object' && tipoPersonaNormalizado.error) {
+        return res.status(400).json({ error: tipoPersonaNormalizado.error });
     }
 
     try {
@@ -742,8 +798,8 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
         const db = pool.promise();
 
         await db.query(
-            `INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, estatus_id, stage_id, usuario_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO leads (id, empresa_id, nombre, correo, telefono, valor, medio, tipo_persona, estatus_id, stage_id, usuario_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 leadId,
                 empresa_id,
@@ -752,6 +808,7 @@ app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','a
                 telefono,
                 valor,
                 medio,
+                tipoPersonaNormalizado,
                 estatusInicial.id,
                 stage_id || null,
                 usuario_id || null,
@@ -776,7 +833,7 @@ app.put('/api/leads/:id',
     validarRecursoEmpresa('SELECT empresa_id FROM leads WHERE id = ?'),
     async (req, res) => {
     const { id } = req.params;
-    const { nombre, correo, telefono, valor, medio, usuario_id, estatus_id, motivo_desactivacion } = req.body;
+    const { nombre, correo, telefono, valor, medio, usuario_id, estatus_id, motivo_desactivacion, tipo_persona } = req.body;
     const db = pool.promise();
 
     try {
@@ -791,7 +848,17 @@ app.put('/api/leads/:id',
             return res.status(400).json({ error: 'No se puede editar un lead cancelado.' });
         }
 
-        if (!valorEstimadoValido(valor)) {
+        const tipoPersonaNormalizado = normalizarTipoPersona(
+            tipo_persona !== undefined ? tipo_persona : leadActual.tipo_persona,
+        );
+        if (tipoPersonaNormalizado && typeof tipoPersonaNormalizado === 'object' && tipoPersonaNormalizado.error) {
+            return res.status(400).json({ error: tipoPersonaNormalizado.error });
+        }
+
+        const valorCotizacion = await obtenerValorActivoCotizacionLead(db, id);
+        const valorAGuardar = valorCotizacion != null ? valorCotizacion : valor;
+
+        if (valorCotizacion == null && !valorEstimadoValido(valor)) {
             return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
         }
 
@@ -814,19 +881,19 @@ app.put('/api/leads/:id',
             }
             await db.query(
                 `UPDATE leads
-                 SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?,
+                 SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, tipo_persona = ?, usuario_id = ?,
                      estatus_id = ?, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP
                  WHERE id = ?`,
-                [nombre, correo, telefono, valor, medio, usuario_id, estatusObjetivo.id, motivo, id],
+                [nombre, correo, telefono, valorAGuardar, medio, tipoPersonaNormalizado, usuario_id, estatusObjetivo.id, motivo, id],
             );
             return res.status(200).json({ mensaje: 'Lead cancelado con éxito' });
         }
 
         await db.query(
             `UPDATE leads
-             SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, usuario_id = ?, estatus_id = ?
+             SET nombre = ?, correo = ?, telefono = ?, valor = ?, medio = ?, tipo_persona = ?, usuario_id = ?, estatus_id = ?
              WHERE id = ?`,
-            [nombre, correo, telefono, valor, medio, usuario_id, estatusObjetivo.id, id],
+            [nombre, correo, telefono, valorAGuardar, medio, tipoPersonaNormalizado, usuario_id, estatusObjetivo.id, id],
         );
         res.status(200).json({ mensaje: 'Lead actualizado con éxito' });
     } catch (error) {
@@ -865,23 +932,18 @@ app.get('/api/cotizaciones/buscar/:empresa_id', (req, res) => {
 
 
 // Asignar o reasignar una cotización a un Lead
-app.put('/api/leads/:lead_id/vincular-cotizacion', (req, res) => {
+app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
     const { lead_id } = req.params;
     const { cotizacion_id } = req.body;
-    
-    // Primero, "desasignamos" cualquier cotización que ya tuviera este lead
-    const queryLimpiar = `UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?`;
-    
-    pool.query(queryLimpiar, [lead_id], (err) => {
-        if (err) return res.status(500).json({ error: "Error limpiando cotizaciones previas" });
-        
-        // Ahora asignamos la nueva cotización
-        const queryAsignar = `UPDATE cotizaciones SET lead_id = ? WHERE id = ?`;
-        pool.query(queryAsignar, [lead_id, cotizacion_id], (error) => {
-            if (error) return res.status(500).json({ error: "Error vinculando la cotización" });
-            res.json({ mensaje: "Cotización asignada con éxito" });
-        });
-    });
+    const db = pool.promise();
+
+    try {
+        await activarCotizacionEnLead(db, lead_id, cotizacion_id);
+        res.json({ mensaje: 'Cotización asignada con éxito' });
+    } catch (error) {
+        console.error('❌ Error vinculando cotización al lead:', error.message);
+        res.status(error.status || 500).json({ error: error.message || 'Error vinculando la cotización' });
+    }
 });
 
 
@@ -1026,6 +1088,256 @@ app.delete('/api/medios/:id',
         });
     },
 );
+
+// ==========================================
+// CATÁLOGO GPS (COTIZADOR)
+// ==========================================
+
+const ROLES_CATALOGO_GPS_LECTURA = ['super_admin', 'supervisor', 'admin_empresa', 'agente'];
+const ROLES_CATALOGO_GPS_EDICION = ['super_admin', 'supervisor', 'admin_empresa'];
+
+app.get('/api/gps-catalogo/:empresa_id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_LECTURA),
+    validarEmpresaParam('empresa_id'),
+    async (req, res) => {
+        const { empresa_id } = req.params;
+
+        try {
+            const catalogo = await listarCatalogoGpsEmpresa(pool.promise(), empresa_id);
+            res.status(200).json(catalogo);
+        } catch (error) {
+            console.error('🚨 Error al listar catálogo GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al listar catálogo GPS' });
+        }
+    },
+);
+
+app.post('/api/gps-proveedores',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    async (req, res) => {
+        const { empresa_id, nombre } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!empresa_id) return res.status(400).json({ error: 'empresa_id es requerido.' });
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del proveedor es obligatorio.' });
+        if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
+            return res.status(403).json({ error: 'No puedes crear proveedores GPS en otra empresa.' });
+        }
+
+        const db = pool.promise();
+
+        try {
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_proveedores WHERE empresa_id = ? AND nombre = ? LIMIT 1',
+                [empresa_id, nombreLimpio],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un proveedor GPS con ese nombre.' });
+            }
+
+            const id = crypto.randomUUID();
+            await db.query(
+                'INSERT INTO gps_proveedores (id, empresa_id, nombre) VALUES (?, ?, ?)',
+                [id, empresa_id, nombreLimpio],
+            );
+
+            res.status(201).json({ mensaje: 'Proveedor GPS creado', id, nombre: nombreLimpio });
+        } catch (error) {
+            console.error('❌ Error al crear proveedor GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al crear proveedor GPS' });
+        }
+    },
+);
+
+app.put('/api/gps-proveedores/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa('SELECT empresa_id FROM gps_proveedores WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+        const { nombre } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del proveedor es obligatorio.' });
+
+        const db = pool.promise();
+
+        try {
+            const [actual] = await db.query(
+                'SELECT id, empresa_id FROM gps_proveedores WHERE id = ? LIMIT 1',
+                [id],
+            );
+            if (!actual.length) return res.status(404).json({ error: 'Proveedor GPS no encontrado.' });
+
+            const empresaId = actual[0].empresa_id;
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_proveedores WHERE empresa_id = ? AND nombre = ? AND id <> ? LIMIT 1',
+                [empresaId, nombreLimpio, id],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un proveedor GPS con ese nombre.' });
+            }
+
+            await db.query('UPDATE gps_proveedores SET nombre = ? WHERE id = ?', [nombreLimpio, id]);
+            res.status(200).json({ mensaje: 'Proveedor GPS actualizado', id, nombre: nombreLimpio });
+        } catch (error) {
+            console.error('❌ Error al actualizar proveedor GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al actualizar proveedor GPS' });
+        }
+    },
+);
+
+app.delete('/api/gps-proveedores/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa('SELECT empresa_id FROM gps_proveedores WHERE id = ?'),
+    async (req, res) => {
+        const { id } = req.params;
+
+        try {
+            await pool.promise().query('DELETE FROM gps_proveedores WHERE id = ?', [id]);
+            res.status(200).json({
+                mensaje: 'Proveedor GPS eliminado. Las cotizaciones guardadas conservan el precio asignado.',
+            });
+        } catch (error) {
+            console.error('❌ Error al eliminar proveedor GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al eliminar proveedor GPS' });
+        }
+    },
+);
+
+app.post('/api/gps-productos',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    async (req, res) => {
+        const { proveedor_id, nombre, precio } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!proveedor_id) return res.status(400).json({ error: 'proveedor_id es requerido.' });
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del producto es obligatorio.' });
+        if (!precioGpsValido(precio)) {
+            return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero.' });
+        }
+
+        const db = pool.promise();
+
+        try {
+            const [proveedor] = await db.query(
+                'SELECT id, empresa_id FROM gps_proveedores WHERE id = ? LIMIT 1',
+                [proveedor_id],
+            );
+            if (!proveedor.length) {
+                return res.status(404).json({ error: 'Proveedor GPS no encontrado.' });
+            }
+            if (!puedeOperarEnEmpresa(req.usuarioCRM, proveedor[0].empresa_id)) {
+                return res.status(403).json({ error: 'No puedes crear productos GPS en otra empresa.' });
+            }
+
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_productos WHERE proveedor_id = ? AND nombre = ? LIMIT 1',
+                [proveedor_id, nombreLimpio],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un producto con ese nombre en este proveedor.' });
+            }
+
+            const id = crypto.randomUUID();
+            const precioNum = Number(precio);
+            await db.query(
+                'INSERT INTO gps_productos (id, proveedor_id, nombre, precio) VALUES (?, ?, ?, ?)',
+                [id, proveedor_id, nombreLimpio, precioNum],
+            );
+
+            res.status(201).json({
+                mensaje: 'Producto GPS creado',
+                id,
+                proveedor_id,
+                nombre: nombreLimpio,
+                precio: precioNum,
+            });
+        } catch (error) {
+            console.error('❌ Error al crear producto GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al crear producto GPS' });
+        }
+    },
+);
+
+app.put('/api/gps-productos/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa(
+        'SELECT p.empresa_id FROM gps_productos pr JOIN gps_proveedores p ON p.id = pr.proveedor_id WHERE pr.id = ?',
+    ),
+    async (req, res) => {
+        const { id } = req.params;
+        const { nombre, precio } = req.body;
+        const nombreLimpio = (nombre || '').trim();
+
+        if (!nombreLimpio) return res.status(400).json({ error: 'El nombre del producto es obligatorio.' });
+        if (!precioGpsValido(precio)) {
+            return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero.' });
+        }
+
+        const db = pool.promise();
+
+        try {
+            const [actual] = await db.query(
+                'SELECT id, proveedor_id FROM gps_productos WHERE id = ? LIMIT 1',
+                [id],
+            );
+            if (!actual.length) return res.status(404).json({ error: 'Producto GPS no encontrado.' });
+
+            const proveedorId = actual[0].proveedor_id;
+            const [duplicado] = await db.query(
+                'SELECT id FROM gps_productos WHERE proveedor_id = ? AND nombre = ? AND id <> ? LIMIT 1',
+                [proveedorId, nombreLimpio, id],
+            );
+            if (duplicado.length) {
+                return res.status(409).json({ error: 'Ya existe un producto con ese nombre en este proveedor.' });
+            }
+
+            const precioNum = Number(precio);
+            await db.query(
+                'UPDATE gps_productos SET nombre = ?, precio = ? WHERE id = ?',
+                [nombreLimpio, precioNum, id],
+            );
+
+            res.status(200).json({
+                mensaje: 'Producto GPS actualizado',
+                id,
+                nombre: nombreLimpio,
+                precio: precioNum,
+            });
+        } catch (error) {
+            console.error('❌ Error al actualizar producto GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al actualizar producto GPS' });
+        }
+    },
+);
+
+app.delete('/api/gps-productos/:id',
+    verificarToken,
+    revisarRol(ROLES_CATALOGO_GPS_EDICION),
+    validarRecursoEmpresa(
+        'SELECT p.empresa_id FROM gps_productos pr JOIN gps_proveedores p ON p.id = pr.proveedor_id WHERE pr.id = ?',
+    ),
+    async (req, res) => {
+        const { id } = req.params;
+
+        try {
+            await pool.promise().query('DELETE FROM gps_productos WHERE id = ?', [id]);
+            res.status(200).json({
+                mensaje: 'Producto GPS eliminado. Las cotizaciones guardadas conservan el precio asignado.',
+            });
+        } catch (error) {
+            console.error('❌ Error al eliminar producto GPS:', error.message);
+            res.status(500).json({ error: error.message || 'Error al eliminar producto GPS' });
+        }
+    },
+);
+
 // 1. RUTA PARA MOVER DE ETAPA (Drag & Drop)
 app.put('/api/leads/:id/etapa',
     verificarToken,
@@ -1125,37 +1437,30 @@ transporter.verify().then(() => {
 // ==========================================
 
 // 1. Guardar una nueva cotización
-app.post('/api/cotizaciones', (req, res) => {
-    const {
-        empresa_id, lead_id, usuario_id, 
-        tipo_activo, // <-- Sigue funcionando normal
-        marca, modelo, anio, nombre_activo, // <-- AQUÍ ENTRAN TUS 3 CAMPOS + EL COMBINADO
-        valor_activo, plazo, tipo_renta, 
-        porcentaje_vr, vr_calculado, pago_inicial, 
-        renta_mensual_sin_iva, renta_mensual_con_iva
-    } = req.body;
-
+app.post('/api/cotizaciones', async (req, res) => {
+    const datos = normalizarDatosCotizacion(req.body);
+    const { lead_id, valor_activo } = datos;
     const nuevaCotizacionId = crypto.randomUUID();
 
-    const query = `
-        INSERT INTO cotizaciones 
-        (id, empresa_id, lead_id, usuario_id, tipo_activo, marca, modelo, anio, nombre_activo, valor_activo, plazo, tipo_renta, porcentaje_vr, vr_calculado, pago_inicial, renta_mensual_sin_iva, renta_mensual_con_iva) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+    try {
+        const { modo } = await guardarCotizacion(pool, nuevaCotizacionId, datos);
 
-    pool.query(query, [
-        nuevaCotizacionId, empresa_id, lead_id || null, usuario_id || null, 
-        tipo_activo, marca, modelo, anio, nombre_activo, // <-- AQUÍ SE GUARDAN LOS NUEVOS DATOS
-        valor_activo, plazo, tipo_renta, 
-        porcentaje_vr, vr_calculado, pago_inicial, 
-        renta_mensual_sin_iva, renta_mensual_con_iva
-    ], (error) => {
-        if (error) {
-            console.error("❌ ERROR AL GUARDAR COTIZACIÓN:", error.sqlMessage || error);
-            return res.status(500).json({ error: error.sqlMessage || "Error al guardar en BD" });
+        if (lead_id) {
+            const db = pool.promise();
+            await activarCotizacionEnLead(db, lead_id, nuevaCotizacionId);
         }
-        res.status(201).json({ mensaje: "✅ Cotización guardada con éxito", id: nuevaCotizacionId });
-    });
+
+        const respuesta = { mensaje: '✅ Cotización guardada con éxito', id: nuevaCotizacionId };
+        if (modo === 'legado') {
+            respuesta.aviso = 'Parámetros del cotizador no persistidos: ejecuta db/migrations/schema-v2.sql (sección 10) para réplica idéntica.';
+        }
+        res.status(201).json(respuesta);
+    } catch (error) {
+        console.error('❌ ERROR AL GUARDAR COTIZACIÓN:', error.sqlMessage || error.message || error);
+        res.status(error.status || 500).json({
+            error: error.sqlMessage || error.message || 'Error al guardar en BD',
+        });
+    }
 });
 
 
@@ -1201,15 +1506,29 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     });
 });
 
+// Obtener una cotización por ID (réplica / detalle; después de rutas con segmento fijo)
+app.get('/api/cotizaciones/:id', (req, res) => {
+    const { id } = req.params;
+    pool.query('SELECT * FROM cotizaciones WHERE id = ?', [id], (error, resultados) => {
+        if (error) return res.status(500).json({ error: error.message });
+        if (resultados.length === 0) return res.status(404).json({ error: 'Cotización no encontrada.' });
+        res.status(200).json(resultados[0]);
+    });
+});
+
 // 4. Vincular una cotización existente a un prospecto
-app.put('/api/cotizaciones/:id/vincular-lead', (req, res) => {
+app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
     const { id } = req.params;
     const { lead_id } = req.body;
-    
-    pool.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [lead_id, id], (error) => {
-        if (error) return res.status(500).json({ error: error.message });
-        res.status(200).json({ mensaje: "✅ Cotización vinculada al prospecto" });
-    });
+    const db = pool.promise();
+
+    try {
+        await activarCotizacionEnLead(db, lead_id, id);
+        res.status(200).json({ mensaje: '✅ Cotización vinculada al prospecto' });
+    } catch (error) {
+        console.error('❌ Error vinculando cotización al prospecto:', error.message);
+        res.status(error.status || 500).json({ error: error.message || 'Error al vincular cotización' });
+    }
 });
 
 

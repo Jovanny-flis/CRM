@@ -29,7 +29,7 @@ SHOW TABLES LIKE 'lead_estatus';
 
 | Archivo | Rol |
 | ------- | --- |
-| `schema-v2.sql` | Única migración acumulada: canales, estatus de prospectos, columnas de cancelación en `leads`, tabla `lead_etapas_historial`. |
+| `schema-v2.sql` | Única migración acumulada: canales, estatus de prospectos, columnas de cancelación en `leads`, tabla `lead_etapas_historial`, activo automotriz en `cotizaciones` y **§10** parámetros del cotizador (`tipo_arrendamiento`, `tasa_anual`, pagos, seguro, GPS, trámites, flags). |
 
 Las migraciones parciales `v001`–`v004` fueron retiradas; su contenido está unificado aquí.
 

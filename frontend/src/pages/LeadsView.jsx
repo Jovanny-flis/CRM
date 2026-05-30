@@ -1,8 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
+import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
+import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
 
+const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
 
 const valorEstimadoValido = (valor) => {
@@ -10,7 +14,15 @@ const valorEstimadoValido = (valor) => {
   return Number.isFinite(n) && n > 0;
 };
 
+const valorMostrableLead = (lead) => {
+  if (lead.cotizacion_id && lead.cotizacion_valor_activo != null) {
+    return parseFloat(lead.cotizacion_valor_activo);
+  }
+  return parseFloat(lead.valor || 0);
+};
+
 function LeadsView() {
+  const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
   const [medios, setMedios] = useState([]);
   const [etapas, setEtapas] = useState([]);
@@ -36,6 +48,7 @@ function LeadsView() {
     telefono: '', 
     valor: '', 
     medio: '',
+    tipo_persona: '',
     usuario_id: '',
     estatus_id: ''
   });
@@ -47,6 +60,7 @@ function LeadsView() {
     usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : ''
   );
   const [filtroEstatusIds, setFiltroEstatusIds] = useState([]);
+  const [modoFiltroEstatus, setModoFiltroEstatus] = useState('predeterminado');
   const [menuEstatusAbierto, setMenuEstatusAbierto] = useState(false);
   const [motivoDesactivacion, setMotivoDesactivacion] = useState('');
   const [mostrarAvisoCancelacion, setMostrarAvisoCancelacion] = useState(false);
@@ -113,7 +127,7 @@ function LeadsView() {
 
   // CARGA AUTOMÁTICA DE COTIZACIONES AL ABRIR EL BUSCADOR
   useEffect(() => {
-    if (mostrarBuscadorCotizacion && !modoSoloLectura) {
+    if (mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal()) {
       const cargarInicial = async () => {
         setBuscandoCotizaciones(true);
         try {
@@ -133,7 +147,7 @@ function LeadsView() {
     setIsModalOpen(false);
     setLeadEditando(null);
     setModoSoloLectura(false);
-    setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', usuario_id: '', estatus_id: '' });
+    setFormData({ nombre: '', correo: '', telefono: '', valor: '', medio: '', tipo_persona: '', usuario_id: '', estatus_id: '' });
     setMotivoDesactivacion('');
     setMostrarAvisoCancelacion(false);
     setEstatusOriginalCodigo('activo');
@@ -147,8 +161,15 @@ function LeadsView() {
   const esLeadEditable = (lead) => !esLeadCancelado(lead);
   const incluyeEnSuma = (lead) => lead.estatus_incluir_en_suma === 1 || lead.estatus_incluir_en_suma === true;
 
+  const bloqueaCotizacionEnModal = () => {
+    if (!leadEditando) return false;
+    if (leadBloqueaCotizacion(leadEditando)) return true;
+    const est = estatusList.find((e) => String(e.id) === String(formData.estatus_id));
+    return estatusBloqueaCotizacion(est);
+  };
+
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
-  const vaACancelarEnFormulario = formData.estatus_id && formData.estatus_id === estatusCanceladoId;
+  const vaACancelarEnFormulario = formData.estatus_id && String(formData.estatus_id) === String(estatusCanceladoId);
 
   const abrirModalEditar = (leadCompleto) => {
     if (!esLeadEditable(leadCompleto)) return;
@@ -167,8 +188,11 @@ function LeadsView() {
       nombre: leadCompleto.nombre || '',
       correo: leadCompleto.correo || '',
       telefono: leadCompleto.telefono || '',
-      valor: leadCompleto.valor || '',
+      valor: leadCompleto.cotizacion_id
+        ? (leadCompleto.cotizacion_valor_activo ?? leadCompleto.valor ?? '')
+        : (leadCompleto.valor || ''),
       medio: leadCompleto.medio || '',
+      tipo_persona: leadCompleto.tipo_persona || '',
       usuario_id: leadCompleto.usuario_id || '',
       estatus_id: leadCompleto.estatus_id || ''
     });
@@ -176,14 +200,17 @@ function LeadsView() {
     setMotivoDesactivacion('');
     setMostrarAvisoCancelacion(false);
     setIsModalOpen(true);
-    setMostrarBuscadorCotizacion(!leadCompleto.cotizacion_id); 
+    const congelaFolio = leadBloqueaCotizacion(leadCompleto);
+    setMostrarBuscadorCotizacion(!congelaFolio && !leadCompleto.cotizacion_id);
   };
 
   const handleCambioEstatus = (nuevoEstatusId) => {
     if (modoSoloLectura) return;
-    const nuevo = estatusList.find((e) => e.id === nuevoEstatusId);
+    const nuevo = estatusList.find((e) => String(e.id) === String(nuevoEstatusId));
     if (nuevo?.codigo === CODIGO_CANCELADO && estatusOriginalCodigo !== CODIGO_CANCELADO) {
       setMostrarAvisoCancelacion(true);
+    } else {
+      setMostrarAvisoCancelacion(false);
     }
     if (nuevo?.codigo !== CODIGO_CANCELADO) {
       setMotivoDesactivacion('');
@@ -196,15 +223,54 @@ function LeadsView() {
   };
 
   const toggleFiltroEstatus = (id) => {
-    setFiltroEstatusIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setModoFiltroEstatus('seleccion');
+    setFiltroEstatusIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      if (next.length === 0) {
+        setModoFiltroEstatus('predeterminado');
+      }
+      return next;
+    });
+  };
+
+  const seleccionarTodosLosEstatus = () => {
+    setModoFiltroEstatus('todos');
+    setFiltroEstatusIds([]);
+    setMenuEstatusAbierto(false);
+  };
+
+  const seleccionarVistaPredeterminada = () => {
+    setModoFiltroEstatus('predeterminado');
+    setFiltroEstatusIds([]);
+    setMenuEstatusAbierto(false);
+  };
+
+  const codigoEstatusLead = (lead) => lead.estatus_codigo || CODIGO_ACTIVO;
+
+  const leadCoincideConFiltroEstatus = (lead) => {
+    const codigoLead = codigoEstatusLead(lead);
+    const idLead = lead.estatus_id != null ? String(lead.estatus_id) : null;
+
+    if (modoFiltroEstatus === 'todos') return true;
+
+    if (modoFiltroEstatus === 'predeterminado') {
+      return codigoLead !== CODIGO_CANCELADO;
+    }
+
+    return filtroEstatusIds.some((idFiltro) => {
+      if (idLead && String(idFiltro) === idLead) return true;
+      const est = estatusList.find((e) => String(e.id) === String(idFiltro));
+      return est?.codigo === codigoLead;
+    });
   };
 
   const etiquetaFiltroEstatus = () => {
-    if (filtroEstatusIds.length === 0) return 'Todos los estatus';
+    if (modoFiltroEstatus === 'todos') return 'Todos los estatus';
+    if (modoFiltroEstatus === 'predeterminado' || filtroEstatusIds.length === 0) {
+      return 'Vista predeterminada';
+    }
     if (filtroEstatusIds.length === 1) {
-      return estatusList.find((e) => e.id === filtroEstatusIds[0])?.nombre || '1 estatus';
+      return estatusList.find((e) => String(e.id) === String(filtroEstatusIds[0]))?.nombre || '1 estatus';
     }
     return `${filtroEstatusIds.length} estatus`;
   };
@@ -240,7 +306,7 @@ function LeadsView() {
   };
 
   const asignarCotizacion = async (cotizacionId) => {
-    if (modoSoloLectura || !leadEditando || !leadEditando.id) return;
+    if (modoSoloLectura || !leadEditando || !leadEditando.id || bloqueaCotizacionEnModal()) return;
     
     try {
       await api.put(`/leads/${leadEditando.id}/vincular-cotizacion`, { cotizacion_id: cotizacionId });
@@ -256,12 +322,15 @@ function LeadsView() {
     e.preventDefault();
     if (modoSoloLectura) return;
 
-    if (!valorEstimadoValido(formData.valor)) {
+    const tieneCotizacion = Boolean(leadEditando?.cotizacion_id);
+    const valorNumerico = tieneCotizacion
+      ? parseFloat(leadEditando.cotizacion_valor_activo ?? formData.valor)
+      : parseFloat(formData.valor);
+
+    if (!tieneCotizacion && !valorEstimadoValido(formData.valor)) {
       alert('El valor estimado es obligatorio y debe ser mayor a cero.');
       return;
     }
-
-    const valorNumerico = parseFloat(formData.valor);
     const agenteAsignado = usuarioLogueado.rol === 'agente' ? usuarioLogueado.id : formData.usuario_id;
     
     if (leadEditando) {
@@ -276,6 +345,7 @@ function LeadsView() {
         telefono: formData.telefono,
         valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
+        tipo_persona: formData.tipo_persona || null,
         usuario_id: agenteAsignado,
         estatus_id: formData.estatus_id
       };
@@ -303,6 +373,7 @@ function LeadsView() {
         telefono: formData.telefono,
         valor: valorNumerico,
         medio: formData.medio || MEDIO_DEFAULT,
+        tipo_persona: formData.tipo_persona || null,
         stage_id: primeraEtapaId,
         usuario_id: agenteAsignado
       };
@@ -323,8 +394,7 @@ function LeadsView() {
     return leads.filter(lead => {
       const esDeLaEtapa = lead.stage_id === stageId;
       const esDelAgente = filtroAgente === '' || lead.usuario_id === filtroAgente;
-      const cumpleFiltroEstatus =
-        filtroEstatusIds.length === 0 || filtroEstatusIds.includes(lead.estatus_id);
+      const cumpleFiltroEstatus = leadCoincideConFiltroEstatus(lead);
 
       return esDeLaEtapa && esDelAgente && cumpleFiltroEstatus;
     });
@@ -508,16 +578,26 @@ function LeadsView() {
               <div className="absolute z-20 right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-100 py-1 max-h-72 overflow-y-auto">
                 <button
                   type="button"
-                  onClick={() => { setFiltroEstatusIds([]); setMenuEstatusAbierto(false); }}
+                  onClick={seleccionarVistaPredeterminada}
                   className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                    filtroEstatusIds.length === 0 ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                    modoFiltroEstatus === 'predeterminado' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Vista predeterminada
+                  {modoFiltroEstatus === 'predeterminado' && <Check size={14} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={seleccionarTodosLosEstatus}
+                  className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
+                    modoFiltroEstatus === 'todos' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Todos los estatus
-                  {filtroEstatusIds.length === 0 && <Check size={14} />}
+                  {modoFiltroEstatus === 'todos' && <Check size={14} />}
                 </button>
                 {estatusList.map((est) => {
-                  const sel = filtroEstatusIds.includes(est.id);
+                  const sel = modoFiltroEstatus === 'seleccion' && filtroEstatusIds.includes(est.id);
                   return (
                     <button
                       key={est.id}
@@ -566,7 +646,7 @@ function LeadsView() {
           const leadsFiltrados = obtenerLeadsPorEtapaId(etapa.id);
           const sumaTotal = leadsFiltrados.reduce((total, lead) => {
             if (!incluyeEnSuma(lead)) return total;
-            return total + parseFloat(lead.valor || 0);
+            return total + valorMostrableLead(lead);
           }, 0);
 
           return (
@@ -639,35 +719,39 @@ function LeadsView() {
                       )}
                     </div>
 
-                    {/* ETIQUETA FOLIO COTIZACIÓN EN LA TARJETA */}
-                    {lead.cotizacion_folio && (
-                      <span className={`absolute top-3 right-3 text-[9px] font-black tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none text-white bg-[#ea5533] shadow-sm ${editable ? 'group-hover:opacity-0' : ''}`}>
-                        FL-{String(lead.cotizacion_folio).padStart(3, '0')}
-                      </span>
-                    )}
-                    
-                    {!lead.cotizacion_folio && (
-                      <span className={`absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded z-10 pointer-events-none ${
+                    {/* BADGES ESQUINA SUPERIOR DERECHA: folio arriba, tipo persona, estatus abajo */}
+                    <div className={`absolute top-3 right-3 flex flex-col items-end gap-1 z-10 pointer-events-none ${editable ? 'group-hover:opacity-0' : ''}`}>
+                      {lead.cotizacion_folio && (
+                        <span className="text-[9px] font-black tracking-wider px-2 py-0.5 rounded text-white bg-[#ea5533] shadow-sm">
+                          FL-{String(lead.cotizacion_folio).padStart(3, '0')}
+                        </span>
+                      )}
+                      {lead.tipo_persona && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded text-slate-600 bg-white/90 border border-slate-200">
+                          {lead.tipo_persona}
+                        </span>
+                      )}
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
                         cancelado
                           ? 'text-slate-500 bg-slate-200'
                           : 'text-slate-600 bg-white/90 border border-slate-200'
-                      } ${editable ? 'group-hover:opacity-0' : ''}`}>
+                      }`}>
                         {lead.estatus_nombre || '—'}
                       </span>
-                    )}
+                    </div>
 
                     <div className={`flex justify-between items-start mb-1 pr-14`}>
                       <p className={`font-bold text-sm truncate ${cancelado ? 'text-slate-500' : 'text-slate-900'}`}>{lead.nombre || "Sin nombre"}</p>
                     </div>
 
                     <div className="mb-2">
-                      {parseFloat(lead.valor) > 0 && (
+                      {valorMostrableLead(lead) > 0 && (
                         <span className={`font-bold text-[11px] px-2 py-0.5 rounded-md border whitespace-nowrap inline-block mb-1 ${
                           incluyeEnSuma(lead)
                             ? 'text-green-700 bg-green-50 border-green-200'
                             : 'text-slate-500 bg-slate-200 border-slate-300'
                         }`}>
-                          {formatoMoneda(lead.valor)}
+                          {formatoMoneda(valorMostrableLead(lead))}
                         </span>
                       )}
                       <p className={`text-[11px] truncate ${cancelado ? 'text-slate-400' : 'text-slate-500'}`}>{lead.correo || 'Sin correo'}</p>
@@ -756,6 +840,20 @@ function LeadsView() {
                         placeholder="Ej. Juan Pérez" 
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de persona</label>
+                      <select
+                        value={formData.tipo_persona}
+                        onChange={(e) => setFormData({ ...formData, tipo_persona: e.target.value })}
+                        disabled={modoSoloLectura}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800"
+                      >
+                        {OPCIONES_TIPO_PERSONA.map((op) => (
+                          <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
+                        ))}
+                      </select>
+                    </div>
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -784,13 +882,15 @@ function LeadsView() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>Valor Estimado ($) *</label>
+                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>
+                          {leadEditando?.cotizacion_id ? 'Valor del activo (cotización)' : 'Valor Estimado ($) *'}
+                        </label>
                         <input 
                           type="number" required min="0.01" step="0.01" 
                           value={formData.valor} 
                           onChange={(e) => setFormData({...formData, valor: e.target.value})} 
-                          disabled={modoSoloLectura}
-                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
+                          disabled={modoSoloLectura || Boolean(leadEditando?.cotizacion_id)}
+                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura || leadEditando?.cotizacion_id ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
                           placeholder="Ej. 15000" 
                         />
                       </div>
@@ -883,15 +983,26 @@ function LeadsView() {
                         Cotización Asignada
                       </h3>
                       
-                      {/* Botón para cambiar cotización (SOLO EN EDICIÓN) */}
-                      {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && (
-                        <button 
-                          onClick={() => setMostrarBuscadorCotizacion(true)}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-700 underline shrink-0"
-                        >
-                          Cambiar Cotización
-                        </button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-3 shrink-0">
+                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && (
+                          <button
+                            type="button"
+                            onClick={() => navigate('/cotizador', { state: { replicarCotizacionId: leadEditando.cotizacion_id } })}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                          >
+                            Replicar cotización
+                          </button>
+                        )}
+                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal() && (
+                          <button
+                            type="button"
+                            onClick={() => setMostrarBuscadorCotizacion(true)}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                          >
+                            Cambiar Cotización
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* MOSTRAR DATOS SÚPER DETALLADOS DE LA COTIZACIÓN ACTUAL */}
@@ -920,8 +1031,8 @@ function LeadsView() {
                           </div>
 
                           {/* Fila 2: Detalles Vehiculares (Si existen) */}
-                          {(leadEditando.cotizacion_marca || leadEditando.cotizacion_modelo || leadEditando.cotizacion_anio) && (
-                            <div className="grid grid-cols-3 gap-2">
+                          {(leadEditando.cotizacion_marca || leadEditando.cotizacion_modelo || leadEditando.cotizacion_version || leadEditando.cotizacion_anio) && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Marca</div>
                                 <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_marca}>{leadEditando.cotizacion_marca || '-'}</div>
@@ -929,6 +1040,10 @@ function LeadsView() {
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Modelo</div>
                                 <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_modelo}>{leadEditando.cotizacion_modelo || '-'}</div>
+                              </div>
+                              <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
+                                <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Versión</div>
+                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_version}>{leadEditando.cotizacion_version || '-'}</div>
                               </div>
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Año</div>
@@ -972,6 +1087,21 @@ function LeadsView() {
                           </div>
 
                         </div>
+
+                        {bloqueaCotizacionEnModal() && (
+                          <p className="mt-4 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                            Folio congelado: no se puede vincular ni cambiar cotización en este estatus.
+                          </p>
+                        )}
+                      </div>
+                    ) : bloqueaCotizacionEnModal() ? (
+                      <div className="flex-1 flex flex-col items-center justify-center text-center opacity-70 px-4">
+                        <FileText size={48} className="text-slate-400 mb-3" />
+                        <p className="text-sm font-medium text-slate-600">
+                          {leadEditando.cotizacion_id
+                            ? 'Este prospecto tiene el folio congelado en su estatus actual.'
+                            : 'Este prospecto no puede recibir cotización: el folio está congelado en su estatus.'}
+                        </p>
                       </div>
                     ) : (
                       
@@ -1057,6 +1187,23 @@ function LeadsView() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {mostrarAvisoCancelacion && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+            <p className="text-slate-800 font-semibold text-lg leading-relaxed">
+              Si guardas con estatus cancelado, este lead no podrá cambiar de estatus, de etapa, ni editarse de nuevo. Tampoco se podrá vincular ni cambiar su cotización.
+            </p>
+            <button
+              type="button"
+              onClick={confirmarAvisoCancelacion}
+              className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+            >
+              OK
+            </button>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import DashboardLayout from './layouts/DashboardLayout';
 import LeadsView from './pages/LeadsView'; 
@@ -8,6 +8,9 @@ import EmpresasView from './pages/EmpresasView';
 import PipelinesView from './pages/PipelinesView'; 
 import CotizadorView from './pages/CotizadorView';
 import DashboardView from './pages/DashboardView';
+import AvisoSesionModal from './components/AvisoSesionModal';
+import { useGestionSesion } from './hooks/useGestionSesion';
+import { CLAVE_USUARIO } from './lib/sesion';
 
 // 🛡️ NUEVO: ESTE ES NUESTRO CADENERO DEL FRONTEND
 const RutaProtegida = ({ rolesPermitidos, rolActual, children }) => {
@@ -30,8 +33,17 @@ const RutaProtegida = ({ rolesPermitidos, rolActual, children }) => {
 function App() {
   const [usuario, setUsuario] = useState(null);
 
+  const manejarSesionCerrada = useCallback(() => {
+    setUsuario(null);
+  }, []);
+
+  const { mostrarAviso, segundosRestantes, extenderSesion } = useGestionSesion(
+    Boolean(usuario),
+    manejarSesionCerrada
+  );
+
   useEffect(() => {
-    const usuarioGuardado = localStorage.getItem('usuarioCRM');
+    const usuarioGuardado = localStorage.getItem(CLAVE_USUARIO);
     if (usuarioGuardado) {
       setUsuario(JSON.parse(usuarioGuardado));
     }
@@ -49,6 +61,12 @@ function App() {
 
   return (
     <Router>
+      {mostrarAviso && (
+        <AvisoSesionModal
+          segundosRestantes={segundosRestantes}
+          onExtender={extenderSesion}
+        />
+      )}
       <DashboardLayout>
         <Routes>
           {/* Rutas para TODOS (Super admin, admin, supervisor, agente) */}

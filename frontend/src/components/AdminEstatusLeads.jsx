@@ -22,6 +22,7 @@ function AdminEstatusLeads({ empresaId }) {
     color_hex: '',
     incluir_en_suma: true,
     permite_mover: true,
+    bloquea_cotizacion: false,
   });
   const [formEdit, setFormEdit] = useState({
     nombre: '',
@@ -29,6 +30,7 @@ function AdminEstatusLeads({ empresaId }) {
     sin_color: false,
     incluir_en_suma: true,
     permite_mover: true,
+    bloquea_cotizacion: false,
   });
 
   const dragRef = useRef(null);
@@ -165,6 +167,7 @@ function AdminEstatusLeads({ empresaId }) {
       sin_color: sinColor,
       incluir_en_suma: !!item.incluir_en_suma,
       permite_mover: !!item.permite_mover,
+      bloquea_cotizacion: !!item.bloquea_cotizacion,
     });
     setEditando(item);
     setMenuAbiertoId(null);
@@ -180,6 +183,7 @@ function AdminEstatusLeads({ empresaId }) {
         color_hex: formEdit.sin_color ? 'sin_color' : formEdit.color_hex,
         incluir_en_suma: formEdit.incluir_en_suma,
         permite_mover: formEdit.permite_mover,
+        bloquea_cotizacion: formEdit.bloquea_cotizacion,
       };
       await api.put(`/estatus-leads/${editando.id}`, payload);
       setEditando(null);
@@ -214,8 +218,9 @@ function AdminEstatusLeads({ empresaId }) {
         color_hex: formNuevo.color_hex || 'sin_color',
         incluir_en_suma: formNuevo.incluir_en_suma,
         permite_mover: formNuevo.permite_mover,
+        bloquea_cotizacion: formNuevo.bloquea_cotizacion,
       });
-      setFormNuevo({ nombre: '', color_hex: '', incluir_en_suma: true, permite_mover: true });
+      setFormNuevo({ nombre: '', color_hex: '', incluir_en_suma: true, permite_mover: true, bloquea_cotizacion: false });
       cargar();
     } catch (err) {
       alert(err.response?.data?.error || err.message);
@@ -340,7 +345,7 @@ function AdminEstatusLeads({ empresaId }) {
               checked={formNuevo.incluir_en_suma}
               onChange={(e) => setFormNuevo({ ...formNuevo, incluir_en_suma: e.target.checked })}
             />
-            Mostrar en suma del bin
+            Mostrar en suma de la etapa
           </label>
           <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
             <input
@@ -348,7 +353,15 @@ function AdminEstatusLeads({ empresaId }) {
               checked={formNuevo.permite_mover}
               onChange={(e) => setFormNuevo({ ...formNuevo, permite_mover: e.target.checked })}
             />
-            Permite mover en embudo
+            Permite mover de etapa
+          </label>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+            <input
+              type="checkbox"
+              checked={formNuevo.bloquea_cotizacion}
+              onChange={(e) => setFormNuevo({ ...formNuevo, bloquea_cotizacion: e.target.checked })}
+            />
+            Bloquea folio asignado
           </label>
         </div>
         <button type="submit" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700">
@@ -414,7 +427,7 @@ function AdminEstatusLeads({ empresaId }) {
 
                 {esCancelado && (
                   <p className="text-xs text-slate-400">
-                    El estatus cancelado usa color fijo (gris) y no aparece en la suma del bin.
+                    El estatus cancelado usa color fijo (gris), no aparece en la suma del bin y congela el folio asignado permanentemente.
                   </p>
                 )}
 
@@ -435,6 +448,14 @@ function AdminEstatusLeads({ empresaId }) {
                         onChange={(e) => setFormEdit({ ...formEdit, permite_mover: e.target.checked })}
                       />
                       Permite mover en embudo
+                    </label>
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={formEdit.bloquea_cotizacion}
+                        onChange={(e) => setFormEdit({ ...formEdit, bloquea_cotizacion: e.target.checked })}
+                      />
+                      Bloquea folio asignado
                     </label>
                   </div>
                 )}

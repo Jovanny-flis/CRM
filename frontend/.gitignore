@@ -25,3 +25,9 @@ dist-ssr
 node_modules/
 dist/
 .env
+
+# macOS
+.DS_Store
+
+# imágenes
+*.png

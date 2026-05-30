@@ -1,11 +1,53 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { MoreVertical, Plus } from 'lucide-react';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
+import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
+import AdminGpsCatalogoPanel from '../components/AdminGpsCatalogoPanel';
+import SelectorGpsPrecio from '../components/SelectorGpsPrecio';
+import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
+import {
+  cotizacionAFormData,
+  formDataAPayloadCotizacion,
+  formDataCotizadorVacio,
+  formatMontoEnFormulario,
+  limpiarCamposSoloAutomotriz,
+  archivoImagenActivoPdf,
+} from '../lib/cotizacionFormulario';
+import {
+  claveNombreLead,
+  crearLeadOportunidad,
+  leadsPorNombreUnico,
+  vincularCotizacionActiva,
+} from '../lib/destinoProspectoCotizacion';
 
 /** A4 @ 96dpi — dimensiones fijas para PDF consistente entre navegadores */
 const PDF_ANCHO_PX = 794;
 const PDF_ALTO_A4_PX = 1122;
 const PDF_ESCALA_CANVAS = 2;
+
+/** Automotriz: marca - modelo - version - año */
+const armarNombreActivoAutomotriz = ({ marca, modelo, version, anio }) =>
+  [marca, modelo, version, anio]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' - ');
+
+const camposActivoCompletos = (data) => {
+  if (data.tipoArrendamiento === 'Automotriz') {
+    return ['marca', 'modelo', 'version', 'anio'].every((k) => String(data[k] || '').trim() !== '');
+  }
+  return String(data.nombreActivo || '').trim() !== '';
+};
+
+const cotizacionListaParaAccion = (data, erroresCalculo) => {
+  if (Object.keys(erroresCalculo).length > 0) return false;
+  if (!String(data.nombre_cliente || '').trim()) return false;
+  const valor = parseFloat(String(data.valorActivo || '').replace(/,/g, ''));
+  if (!valor || valor <= 0) return false;
+  return camposActivoCompletos(data);
+};
 
 const esperarRecursosPdf = (elemento) => {
   const promesas = [];
@@ -73,21 +115,11 @@ function calcularPMT(tasaAnual, n, pv, fv) {
   return numerador / denominador;
 }
 
-// NUEVO: Función para formatear el número con comas mientras escribes
-const formatMontoFormulario = (val) => {
-  if (!val) return '';
-  // Quitamos todo lo que no sea número o punto
-  let rawValue = val.toString().replace(/[^0-9.]/g, '');
-  // Evitamos que pongan más de un punto
-  const parts = rawValue.split('.');
-  if (parts.length > 2) rawValue = parts[0] + '.' + parts.slice(1).join('');
-  // Separamos enteros de decimales y ponemos comas
-  const [enteros, decimales] = rawValue.split('.');
-  const enterosFormateados = enteros.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return decimales !== undefined ? `${enterosFormateados}.${decimales}` : enterosFormateados;
-};
+const formatMontoFormulario = formatMontoEnFormulario;
 
 const CotizadorView = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
   const [historial, setHistorial] = useState([]); 
   const [cargando, setCargando] = useState(true);
@@ -96,35 +128,23 @@ const CotizadorView = () => {
 
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
+  const muestraCatalogoGps = Boolean(empresaId) && usuarioLogueado.rol !== 'super_admin';
+  const puedeAdministrarGps = ['admin_empresa', 'supervisor'].includes(usuarioLogueado.rol);
 
-  const [formData, setFormData] = useState({
-    lead_id: '', 
-    nombre_cliente: '', 
-    tipoArrendamiento: 'Automotriz', 
-    tipoVehiculo: 'Sedan',
-    nombreActivo: '', 
-    marca: '', 
-    modelo: '', 
-    anio: '', 
-    valorActivo: '', 
-    plazo: '36', 
-    tasaAnual: '18',
-    pagoInicial: '', 
-    isPagoInicialPct: true, 
-    residual: '', 
-    isResidualPct: true,
-    comision: '', 
-    isComisionPct: true, 
-    seguro: '', 
-    isSeguroContado: true, 
-    isSeguroAnual: true,
-    gps: '', 
-    isGpsContado: true, 
-    servicios: ''
-  });
+  const [formData, setFormData] = useState(formDataCotizadorVacio);
+  const [folioOrigenReplicacion, setFolioOrigenReplicacion] = useState(null);
+  const [modalDestino, setModalDestino] = useState(null);
+  const [referenciaNombreClave, setReferenciaNombreClave] = useState('');
+  const [menuHistorialId, setMenuHistorialId] = useState(null);
+  const [gpsCatalogo, setGpsCatalogo] = useState([]);
+  const [panelGpsAbierto, setPanelGpsAbierto] = useState(false);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
+
+  const puedeGuardarOPdf = cotizacionListaParaAccion(formData, errores);
+
+  const leadsNombreUnico = useMemo(() => leadsPorNombreUnico(leads), [leads]);
 
   const cargarHistorial = () => {
     api.get(`/cotizaciones/empresa/${empresaId}?usuario_id=${usuarioLogueado.id}&rol=${usuarioLogueado.rol}`)
@@ -148,14 +168,171 @@ const CotizadorView = () => {
     }
   }, [empresaId]);
 
+  useEffect(() => {
+    if (!muestraCatalogoGps) return undefined;
+    api.get(`/gps-catalogo/${empresaId}`)
+      .then((res) => setGpsCatalogo(res.data))
+      .catch((err) => console.error('Error al cargar catálogo GPS:', err));
+    return undefined;
+  }, [empresaId, muestraCatalogoGps]);
+
+  useEffect(() => {
+    const cotId = location.state?.replicarCotizacionId;
+    if (!cotId || !empresaId) return undefined;
+
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await api.get(`/cotizaciones/${cotId}`);
+        if (cancelado) return;
+        setFormData(cotizacionAFormData(res.data, { paraReplicar: true }));
+        setFolioOrigenReplicacion(res.data.folio ?? null);
+        navigate('/cotizador', { replace: true, state: {} });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (error) {
+        console.error('Error al replicar cotización:', error);
+        alert('No se pudo cargar la cotización a replicar.');
+        navigate('/cotizador', { replace: true, state: {} });
+      }
+    })();
+
+    return () => { cancelado = true; };
+  }, [location.state?.replicarCotizacionId, empresaId, navigate]);
+
+  useEffect(() => {
+    if (!menuHistorialId) return undefined;
+    const cerrarMenu = (e) => {
+      if (e.target.closest('[data-menu-historial-cot]')) return;
+      setMenuHistorialId(null);
+    };
+    document.addEventListener('click', cerrarMenu);
+    return () => document.removeEventListener('click', cerrarMenu);
+  }, [menuHistorialId]);
+
+  const aplicarReplicacion = (cot) => {
+    setFormData(cotizacionAFormData(cot, { paraReplicar: true }));
+    setFolioOrigenReplicacion(cot.folio ?? null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const limpiarFormulario = () => {
+    setFormData(formDataCotizadorVacio());
+    setFolioOrigenReplicacion(null);
+    setReferenciaNombreClave('');
+  };
+
   const handleLeadChange = (e) => {
-    const id = e.target.value;
-    const leadSel = leads.find(l => l.id === id);
-    setFormData(prev => ({ 
-      ...prev, 
-      lead_id: id, 
-      nombre_cliente: leadSel ? leadSel.nombre : '' 
+    const clave = e.target.value;
+    setReferenciaNombreClave(clave);
+    if (!clave) return;
+    const leadSel = leadsNombreUnico.find((l) => claveNombreLead(l.nombre) === clave);
+    setFormData((prev) => ({
+      ...prev,
+      lead_id: '',
+      nombre_cliente: leadSel ? leadSel.nombre : prev.nombre_cliente,
+      tipo_persona: leadSel ? (leadSel.tipo_persona || '') : prev.tipo_persona,
     }));
+  };
+
+  const sincronizarTipoPersonaLead = async (leadId) => {
+    const leadRef = leads.find((l) => l.id === leadId);
+    if (!leadRef) return;
+
+    const tipoForm = formData.tipo_persona || null;
+    const tipoLead = leadRef.tipo_persona || null;
+    if (String(tipoForm || '') === String(tipoLead || '')) return;
+
+    await api.put(`/leads/${leadId}`, {
+      nombre: leadRef.nombre,
+      correo: leadRef.correo || '',
+      telefono: leadRef.telefono || '',
+      valor: leadRef.valor,
+      medio: leadRef.medio || '',
+      usuario_id: leadRef.usuario_id,
+      estatus_id: leadRef.estatus_id,
+      tipo_persona: tipoForm,
+    });
+  };
+
+  const ejecutarGuardadoConDestino = async (destino) => {
+    setGuardando(true);
+    let finalLeadId = null;
+
+    try {
+      if (destino.tipo === 'nuevo') {
+        finalLeadId = await crearLeadOportunidad(api, {
+          empresaId,
+          usuarioId: usuarioLogueado.id,
+          nombre: destino.nombre || formData.nombre_cliente,
+          tipoPersona: formData.tipo_persona || null,
+          valorActivo: parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0,
+          medio: 'Cotizador',
+        });
+        cargarLeads();
+      } else if (destino.tipo === 'existente') {
+        finalLeadId = destino.leadId;
+      }
+
+      const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
+        empresaId,
+        usuarioId: usuarioLogueado.id,
+        leadId: null,
+      }));
+
+      if (finalLeadId) {
+        await vincularCotizacionActiva(api, resCot.data.id, finalLeadId);
+        if (formData.tipo_persona) {
+          await sincronizarTipoPersonaLead(finalLeadId);
+        }
+        cargarLeads();
+      }
+
+      const avisoMigracion = resCot.data?.aviso ? `\n\n⚠️ ${resCot.data.aviso}` : '';
+      alert(`✅ Cotización guardada con éxito.${avisoMigracion}`);
+      setFolioOrigenReplicacion(null);
+      cargarHistorial();
+    } catch (error) {
+      const detalle = error.response?.data?.error || error.message;
+      console.error('Error al guardar cotización:', error.response?.data || error);
+      alert(`❌ Error al guardar: ${detalle}`);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const ejecutarGestionHistorial = async (cotizacion, destino) => {
+    try {
+      let leadId = null;
+      if (destino.tipo === 'nuevo') {
+        leadId = await crearLeadOportunidad(api, {
+          empresaId,
+          usuarioId: usuarioLogueado.id,
+          nombre: destino.nombre,
+          valorActivo: cotizacion.valor_activo || 0,
+          medio: 'Cotizador (Historial)',
+        });
+      } else if (destino.tipo === 'existente') {
+        leadId = destino.leadId;
+      }
+
+      await vincularCotizacionActiva(api, cotizacion.id, leadId);
+      alert('✅ Cotización vinculada al prospecto.');
+      cargarLeads();
+      cargarHistorial();
+    } catch (error) {
+      alert(`❌ ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  const resolverModalDestino = (destino) => {
+    const ctx = modalDestino;
+    setModalDestino(null);
+    if (!ctx) return;
+    if (ctx.modo === 'guardar') {
+      ejecutarGuardadoConDestino(destino);
+    } else {
+      ejecutarGestionHistorial(ctx.cotizacion, destino);
+    }
   };
 
   useEffect(() => {
@@ -190,9 +367,10 @@ const CotizadorView = () => {
     const comInput = parseFloat(String(formData.comision).replace(/,/g, '')) || 0;
     const comisionReal = formData.isComisionPct ? comInput * (valorActivo - inicialReal) / 100 : comInput;
 
-    const gpsInput = parseFloat(String(formData.gps).replace(/,/g, '')) || 0;
-    const gpsContado = formData.isGpsContado ? gpsInput : 0;
-    const serviciosReal = parseFloat(String(formData.servicios).replace(/,/g, '')) || 0;
+    const esAutomotriz = formData.tipoArrendamiento === 'Automotriz';
+    const gpsInput = esAutomotriz ? (parseFloat(String(formData.gps).replace(/,/g, '')) || 0) : 0;
+    const gpsContado = esAutomotriz && formData.isGpsContado ? gpsInput : 0;
+    const serviciosReal = esAutomotriz ? (parseFloat(String(formData.servicios).replace(/,/g, '')) || 0) : 0;
 
     const seguroInput = parseFloat(String(formData.seguro).replace(/,/g, '')) || 0;
     let seguroContado = formData.isSeguroContado ? seguroInput : 0;
@@ -205,7 +383,9 @@ const CotizadorView = () => {
     const comisionSub = comisionReal / 1.16;
 
     const seguroFinMensual = !formData.isSeguroContado ? calcularPMT(tasaAnual, (formData.isSeguroAnual ? 12 : plazo), seguroFinanciadoBase, 0) : 0;
-    const gpsFinMensual = !formData.isGpsContado ? calcularPMT(tasaAnual, plazo, gpsInput, 0) : 0;
+    const gpsFinMensual = esAutomotriz && !formData.isGpsContado
+      ? calcularPMT(tasaAnual, plazo, gpsInput, 0)
+      : 0;
 
     const pvActivo = valorActivo - inicialReal;
     const r = (tasaAnual * 1.16) / 12 / 100;
@@ -229,153 +409,58 @@ const CotizadorView = () => {
     });
   }, [formData]);
 
-  const handleGuardarCotizacion = async () => {
-    if (Object.keys(errores).length > 0 || !formData.valorActivo) return alert("Corrige los errores antes de guardar.");
-    if (!formData.nombre_cliente) return alert("Escribe el nombre del cliente para poder guardar la cotización.");
-
-    setGuardando(true);
-    let finalLeadId = formData.lead_id || null;
-
-    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
-      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
-      : formData.nombreActivo.trim();
-
-    try {
-      if (!finalLeadId) {
-        const crearProspecto = window.confirm(`¿Deseas generar a "${formData.nombre_cliente}" como un prospecto en tu tablero del CRM? \n\n(Si le das a Cancelar, solo se guardará la cotización)`);
-        
-        if (crearProspecto) {
-          const resPipe = await api.get(`/pipelines/${empresaId}`);
-          let primeraEtapaId = null;
-          if (resPipe.data.length > 0) {
-            const resEtapas = await api.get(`/etapas/${resPipe.data[0].id}`);
-            if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
-          }
-
-          await api.post('/leads', {
-            empresa_id: empresaId,
-            nombre: formData.nombre_cliente,
-            correo: '', 
-            telefono: '',
-            valor: parseFloat(formData.valorActivo) || 0,
-            medio: 'Cotizador',
-            stage_id: primeraEtapaId,
-            usuario_id: usuarioLogueado.id
-          });
-
-          const resLeads = await api.get(`/leads/${empresaId}`);
-          setLeads(resLeads.data);
-          const leadNuevo = resLeads.data.find(l => l.nombre === formData.nombre_cliente);
-          if (leadNuevo) finalLeadId = leadNuevo.id;
-        }
-      }
-
-      await api.post('/cotizaciones', {
-        empresa_id: empresaId, 
-        lead_id: finalLeadId, 
-        usuario_id: usuarioLogueado.id,
-        tipo_activo: formData.tipoArrendamiento === 'Automotriz' ? formData.tipoVehiculo : formData.tipoArrendamiento,
-        marca: formData.tipoArrendamiento === 'Automotriz' ? formData.marca : '',
-        modelo: formData.tipoArrendamiento === 'Automotriz' ? formData.modelo : '',
-        anio: formData.tipoArrendamiento === 'Automotriz' ? formData.anio : '',
-        nombre_activo: nombreCombinado,
-        // MODIFICADO: Guardar sin comas en la BD
-        valor_activo: parseFloat(String(formData.valorActivo).replace(/,/g, '')), 
-        plazo: parseInt(formData.plazo), 
-        tipo_renta: 'Vencida',
-        porcentaje_vr: formData.isResidualPct ? parseFloat(String(formData.residual).replace(/,/g, '')) : 0, 
-        vr_calculado: res.residualReal, 
-        pago_inicial: res.pagoInicialTotal,
-        renta_mensual_sin_iva: res.rentaMensualSubtotal, 
-        renta_mensual_con_iva: res.rentaMensualTotal
-      });
-
-      alert("✅ Cotización guardada con éxito.");
-      cargarHistorial(); 
-    } catch (error) {
-      alert("❌ Error al guardar: " + error.message);
-    } finally {
-      setGuardando(false);
-    }
-  };
-
-  const convertirDesdeHistorial = async (cotizacion) => {
-    const nombreLead = window.prompt("Nombre del cliente para el nuevo prospecto:", "Cliente Cotización");
-    if (!nombreLead) return; 
-
-    try {
-      const resPipe = await api.get(`/pipelines/${empresaId}`);
-      let primeraEtapaId = null;
-      if (resPipe.data.length > 0) {
-        const resEtapas = await api.get(`/etapas/${resPipe.data[0].id}`);
-        if (resEtapas.data.length > 0) primeraEtapaId = resEtapas.data[0].id;
-      }
-
-      await api.post('/leads', {
-        empresa_id: empresaId,
-        nombre: nombreLead,
-        correo: '', 
-        telefono: '',
-        valor: cotizacion.valor_activo || 0,
-        medio: 'Cotizador (Historial)',
-        stage_id: primeraEtapaId,
-        usuario_id: usuarioLogueado.id
-      });
-
-      const resLeads = await api.get(`/leads/${empresaId}`);
-      setLeads(resLeads.data);
-      const leadNuevo = resLeads.data.find(l => l.nombre === nombreLead);
-
-      if (leadNuevo) {
-        await api.put(`/cotizaciones/${cotizacion.id}/vincular-lead`, { lead_id: leadNuevo.id });
-        alert("🎉 Prospecto creado y vinculado a la cotización exitosamente.");
-        cargarHistorial(); 
-      }
-
-    } catch (error) {
-      alert("Error al convertir a prospecto: " + error.message);
-    }
+  const handleGuardarCotizacion = () => {
+    if (!puedeGuardarOPdf || guardando) return;
+    setModalDestino({ modo: 'guardar' });
   };
 
   const imprimirPDF = async () => {
-    if (Object.keys(errores).length > 0 || !formData.valorActivo)
-      return alert("Completa la cotización sin errores.");
-    if (generandoPdf) return;
+    if (!puedeGuardarOPdf || generandoPdf) return;
 
     setGenerandoPdf(true);
     let wrapper = null;
 
-    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz' 
-      ? `${formData.marca} ${formData.modelo} ${formData.anio}`.trim() 
+    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
+      ? armarNombreActivoAutomotriz(formData)
       : formData.nombreActivo.trim();
 
     const fechaHoy = new Date().toLocaleDateString('es-MX', {
       day: '2-digit', month: 'long', year: 'numeric'
     });
     const logoUrl = `${window.location.origin}/branding/flising-logo-blanco.png`;
+    const imagenActivoUrl = `${window.location.origin}/cotizacion-activos/${archivoImagenActivoPdf(formData)}`;
+    const etiquetaImagenActivo = formData.tipoArrendamiento === 'Automotriz'
+      ? formData.tipoVehiculo
+      : 'Otro';
 
     const htmlContent = `
     <div style="font-family: 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif; font-size: 10px; background: white; width: ${PDF_ANCHO_PX}px; min-height: ${PDF_ALTO_A4_PX}px; margin: 0; padding: 0; display: flex; flex-direction: column; box-sizing: border-box;">
 
-      <!-- BANDA SUPERIOR GRIS: sin border-radius, ocupa todo el ancho -->
-      <div style="background-color: #2c2c2c; padding: 5px 24px 20px 24px; margin: 0;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+      <!-- BANDA SUPERIOR GRIS: logo + texto izquierda; activo derecha (misma altura de imágenes) -->
+      <div style="background-color: #2c2c2c; padding: 5px 24px 12px 24px; margin: 0;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+          <div style="color: white; flex: 1; min-width: 0;">
+            <img
+              src="${logoUrl}"
+              alt="Flising"
+              style="height: 110px; object-fit: contain; display: block; margin-bottom: 2px;"
+              onerror="this.style.display='none'"
+            />
+            <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">COTIZACIÓN</div>
+            <div style="color: #cccccc; font-size: 10px; line-height: 1.8;">
+              <div><strong style="color: white;">Fecha de expedición</strong>&nbsp;&nbsp;${fechaHoy}</div>
+            </div>
+            <div style="font-size: 10px; color: #cccccc; line-height: 1.5; margin-top: 4px;">
+              Agradecemos tu confianza en Flising, es un gusto atenderte.<br/>
+              A continuación, te presentamos los detalles específicos de tu cotización solicitada.
+            </div>
+          </div>
           <img
-            src="${logoUrl}"
-            alt="Flising"
-            style="height: 110px; object-fit: contain;"
+            src="${imagenActivoUrl}"
+            alt="${etiquetaImagenActivo}"
+            style="height: 200px; max-width: 270px; object-fit: contain; flex-shrink: 0;"
             onerror="this.style.display='none'"
           />
-          <div style="text-align: right; color: #cccccc; font-size: 10px; line-height: 1.8;">
-            <div><strong style="color: white;">Fecha de expedición</strong>&nbsp;&nbsp;${fechaHoy}</div>
-          </div>
-        </div>
-        <div style="color: white;">
-          <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">COTIZACIÓN</div>
-          <div style="font-size: 10px; color: #cccccc; line-height: 1.5;">
-            Agradecemos tu confianza en Flising, es un gusto atenderte.<br/>
-            A continuación, te presentamos los detalles específicos de tu cotización solicitada.
-          </div>
         </div>
       </div>
 
@@ -403,7 +488,7 @@ const CotizadorView = () => {
       </div>
 
       <!-- TABLAS DE PAGO INICIAL Y RENTA MENSUAL -->
-      <div style="padding: 14px 24px; background: white;">
+      <div style="padding: 14px 24px 2px 24px; background: white;">
         <table style="width: 100%; border-collapse: collapse;">
           <tr style="vertical-align: top;">
 
@@ -527,19 +612,20 @@ const CotizadorView = () => {
       <div style="padding: 0px 24px 8px 24px; background: white; font-size: 9.5px; color: #333; line-height: 1.5;">
         <p style="font-weight: 700; margin: 6px 0 3px 0;">OBSERVACIONES</p>
         <ul style="margin: 0; padding-left: 14px;">
-          <li>- Sujeto a aprobación de crédito.</li>
-          <li>- Cotización sujeta a cambios sin previo aviso.</li>
-          <li>- Seguro y GPS obligatorio a cargo del cliente con renovaciones anuales (en caso de aplicar) cobertura amplia.</li>
-          <li>- El valor de la tenencia y/o impuestos gubernamentales es estimado, sujeto a la fórmula gubernamental vigente y a la fecha de entrega de la unidad.</li>
-          <li>- Sujeto a disponibilidad del activo en sus variantes y/o colores, así como su valor.</li>
+          <li> Sujeto a aprobación de crédito.</li>
+          <li> Cotización sujeta a cambios sin previo aviso.</li>
+          <li> Seguro y GPS obligatorio a cargo del cliente con renovaciones anuales (en caso de aplicar) cobertura amplia.</li>
+          <li> El valor de la tenencia y/o impuestos gubernamentales es estimado, sujeto a la fórmula gubernamental vigente y a la fecha de entrega de la unidad.</li>
+          <li> Sujeto a disponibilidad del activo en sus variantes y/o colores, así como su valor.</li>
         </ul>
         <p style="font-weight: 700; margin: 8px 0 3px 0;">NOTAS</p>
         <ul style="margin: 0; padding-left: 14px;">
-          <li>- Oferta preliminar sujeta a modificación según evaluación crediticia. Las condiciones definitivas se establecerán después de concluir satisfactoriamente el proceso de precalificación.</li>
-          <li>- Al pago inicial se le suma el pago del seguro anual una vez que se confirme el precio de este o en caso de ser financiado, la parte que corresponda.</li>
-          <li>- 1er renta deberá ser pagada antes o a la entrega del bien arrendado.</li>
-          <li>- El Arrendatario pagará las rentas proporcionales que se generen entre el día de entrega del vehículo y la fecha de inicio del arrendamiento.</li>
-          <li>- El pago mensual es domiciliado el día 1 de cada mes.</li>
+          <li> Oferta preliminar sujeta a modificación según evaluación crediticia. Las condiciones definitivas se establecerán después de concluir satisfactoriamente el proceso de precalificación.</li>
+          <li> Al pago inicial se le suma el pago del seguro anual una vez que se confirme el precio de este o en caso de ser financiado, la parte que corresponda.</li>
+          <li> 1er renta deberá ser pagada antes o a la entrega del bien arrendado.</li>
+          <li> El Arrendatario pagará las rentas proporcionales que se generen entre el día de entrega del vehículo y la fecha de inicio del arrendamiento.</li>
+          <li> El pago mensual es domiciliado el día 1 de cada mes.</li>
+          <li> La arrendadora se reserva el derecho de adquirir los activos objeto del arrendamiento con el proveedor, distribuidor o canal comercial que más convenga a sus intereses, condiciones operativas y financieras.</li>
         </ul>
       </div>
 
@@ -552,7 +638,7 @@ const CotizadorView = () => {
           He leído y entiendo plenamente las condiciones y disposiciones contenidas en la presente cotización, estoy de acuerdo.
         </p>
         <p style="margin: 5px 0 0 0;">
-          <strong>${formData.nombre_cliente || 'A quien corresponda'}</strong>&nbsp;&nbsp;
+          <strong>${formData.nombre_cliente || 'A quien corresponda'}</strong>.&nbsp;&nbsp;
           Metepec, Edo. de México, a ${fechaHoy}
         </p>
         <p style="margin: 6px 0 0 0; font-size: 9px; color: #555;">
@@ -642,12 +728,18 @@ const CotizadorView = () => {
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
         <button 
-          onClick={() => setFormData({...formData, valorActivo:'', pagoInicial:'', residual:'', comision:'', seguro:'', gps:'', servicios:'', marca:'', modelo:'', anio:'', nombreActivo:''})} 
+          onClick={limpiarFormulario} 
           className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
         >
           Limpiar Campos
         </button>
       </header>
+
+      {folioOrigenReplicacion != null && (
+        <div className="mb-6 p-4 bg-amber-50 text-amber-900 rounded-xl border border-amber-200 text-sm font-medium">
+          Parámetros copiados de FL-{String(folioOrigenReplicacion).padStart(3, '0')}. Al guardar se asignará un folio nuevo; la cotización original no se modifica.
+        </div>
+      )}
 
       {errores.general && (
         <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 font-bold text-sm">
@@ -663,18 +755,24 @@ const CotizadorView = () => {
             
             <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                Prospecto CRM (Opcional)
+                Copiar datos de lead existente (opcional)
               </label>
               <select 
-                value={formData.lead_id} 
+                value={referenciaNombreClave} 
                 onChange={handleLeadChange} 
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
               >
-                <option value="">-- Escribir datos a mano --</option>
-                {leads.map(l => (
-                  <option key={l.id} value={l.id}>{l.nombre}</option>
-                ))}
+                <option value="">-- Escribir nombre manualmente --</option>
+                {leadsNombreUnico.map((l) => {
+                  const clave = claveNombreLead(l.nombre);
+                  return (
+                    <option key={clave} value={clave}>{l.nombre}</option>
+                  );
+                })}
               </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                No vincula al guardar. Al pulsar Guardar DB elegirás nuevo lead, existente o solo cotización.
+              </p>
             </div>
 
             <div>
@@ -692,11 +790,46 @@ const CotizadorView = () => {
 
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                Tipo de persona
+              </label>
+              <select
+                value={formData.tipo_persona}
+                onChange={e => setFormData({ ...formData, tipo_persona: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
+              >
+                {OPCIONES_TIPO_PERSONA.map((op) => (
+                  <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Tipo de Arrendamiento
               </label>
               <select 
                 value={formData.tipoArrendamiento} 
-                onChange={e => setFormData({...formData, tipoArrendamiento: e.target.value})} 
+                onChange={(e) => {
+                  const tipoArrendamiento = e.target.value;
+                  if (tipoArrendamiento === 'Automotriz') {
+                    setFormData((prev) => ({
+                      ...prev,
+                      tipoArrendamiento,
+                      nombreActivo: '',
+                    }));
+                  } else {
+                    setFormData((prev) => ({
+                      ...prev,
+                      tipoArrendamiento,
+                      marca: '',
+                      modelo: '',
+                      version: '',
+                      anio: '',
+                      tipoVehiculo: 'Sedan',
+                      ...limpiarCamposSoloAutomotriz(),
+                    }));
+                  }
+                }} 
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
               >
                 <option value="Automotriz">Automotriz</option>
@@ -725,7 +858,7 @@ const CotizadorView = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                    Marca
+                    Marca *
                   </label>
                   <input 
                     type="text" 
@@ -738,10 +871,10 @@ const CotizadorView = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                    Modelo
+                    Modelo *
                   </label>
                   <input 
-                    type="text" 
+                    type="text"
                     value={formData.modelo} 
                     onChange={e => setFormData({...formData, modelo: e.target.value})} 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
@@ -751,10 +884,23 @@ const CotizadorView = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                    Año
+                    Versión *
                   </label>
                   <input 
-                    type="text" 
+                    type="text"
+                    value={formData.version} 
+                    onChange={e => setFormData({...formData, version: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    placeholder="Ej. Sense"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                    Año *
+                  </label>
+                  <input 
+                    type="text"
                     value={formData.anio} 
                     onChange={e => setFormData({...formData, anio: e.target.value})} 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
@@ -765,10 +911,10 @@ const CotizadorView = () => {
             ) : (
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                  Nombre del activo
+                  Nombre del activo *
                 </label>
                 <input 
-                  type="text" 
+                  type="text"
                   value={formData.nombreActivo} 
                   onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
@@ -867,16 +1013,20 @@ const CotizadorView = () => {
               </div>
             </div>
 
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+            <div className={`p-4 rounded-xl border ${formData.tipoArrendamiento === 'Automotriz' ? 'bg-slate-50 border-slate-100' : 'bg-slate-100/80 border-slate-200'}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Trámites e impuestos
+                {formData.tipoArrendamiento !== 'Automotriz' && (
+                  <span className="ml-2 font-normal normal-case text-slate-400">(solo Automotriz)</span>
+                )}
               </label>
               <input 
                 type="number" 
-                value={formData.servicios} 
+                value={formData.tipoArrendamiento === 'Automotriz' ? formData.servicios : ''} 
                 onChange={e => setFormData({...formData, servicios: e.target.value})} 
-                className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none" 
+                className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400" 
                 disabled={formData.tipoArrendamiento !== 'Automotriz'} 
+                placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
               />
             </div>
 
@@ -901,20 +1051,60 @@ const CotizadorView = () => {
                 </div>
               </div>
               
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-                  GPS
-                </label>
-                <input 
-                  type="number" 
-                  value={formData.gps} 
-                  onChange={e => setFormData({...formData, gps: e.target.value})} 
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2" 
-                  disabled={formData.tipoArrendamiento !== 'Automotriz'} 
-                />
+              <div className={formData.tipoArrendamiento !== 'Automotriz' ? 'opacity-60' : ''}>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-xs font-bold text-slate-500 uppercase">
+                    GPS
+                    {formData.tipoArrendamiento !== 'Automotriz' && (
+                      <span className="ml-2 font-normal normal-case text-slate-400">(solo Automotriz)</span>
+                    )}
+                  </label>
+                  {puedeAdministrarGps && formData.tipoArrendamiento === 'Automotriz' && (
+                    <button
+                      type="button"
+                      onClick={() => setPanelGpsAbierto(true)}
+                      className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-slate-200 bg-slate-50 text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors"
+                      title="Administrar catálogo GPS"
+                      aria-label="Administrar catálogo GPS"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="flex mb-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.tipoArrendamiento === 'Automotriz' ? formData.gps : ''}
+                    onChange={(e) => setFormData({ ...formData, gps: e.target.value })}
+                    className={`flex-1 min-w-0 border border-slate-200 px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                      muestraCatalogoGps ? 'rounded-l-xl rounded-r-none' : 'rounded-xl'
+                    }`}
+                    disabled={formData.tipoArrendamiento !== 'Automotriz'}
+                    placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
+                  />
+                  {muestraCatalogoGps && (
+                    <SelectorGpsPrecio
+                      catalogo={gpsCatalogo}
+                      disabled={formData.tipoArrendamiento !== 'Automotriz'}
+                      onSeleccionarPrecio={(precio) =>
+                        setFormData({ ...formData, gps: String(precio) })
+                      }
+                    />
+                  )}
+                </div>
                 <div className="flex gap-2">
-                  <ToggleBtn flag={formData.isGpsContado} onClick={() => setFormData({...formData, isGpsContado: true})} label="Contado" />
-                  <ToggleBtn flag={!formData.isGpsContado} onClick={() => setFormData({...formData, isGpsContado: false})} label="Financiado" />
+                  <ToggleBtn
+                    flag={formData.isGpsContado}
+                    onClick={() => formData.tipoArrendamiento === 'Automotriz' && setFormData({...formData, isGpsContado: true})}
+                    label="Contado"
+                  />
+                  <ToggleBtn
+                    flag={!formData.isGpsContado}
+                    onClick={() => formData.tipoArrendamiento === 'Automotriz' && setFormData({...formData, isGpsContado: false})}
+                    label="Financiado"
+                  />
                 </div>
               </div>
             </div>
@@ -974,15 +1164,15 @@ const CotizadorView = () => {
           <div className="flex gap-3">
             <button 
               onClick={handleGuardarCotizacion} 
-              disabled={guardando || Object.keys(errores).length > 0} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || Object.keys(errores).length > 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
+              disabled={guardando || !puedeGuardarOPdf} 
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || !puedeGuardarOPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
             >
               {guardando ? 'Guardando...' : '💾 Guardar DB'}
             </button>
             <button 
               onClick={imprimirPDF} 
-              disabled={Object.keys(errores).length > 0 || generandoPdf} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${Object.keys(errores).length > 0 || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
+              disabled={!puedeGuardarOPdf || generandoPdf} 
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGuardarOPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
             >
               {generandoPdf ? 'Generando PDF…' : '📄 Generar PDF'}
             </button>
@@ -1056,14 +1246,63 @@ const CotizadorView = () => {
     <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
 
     <td className="p-4 text-sm">
-      {!cot.lead_nombre && (
-        <button 
-          onClick={() => convertirDesdeHistorial(cot)}
-          className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+      <div className="relative inline-block" data-menu-historial-cot>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuHistorialId(menuHistorialId === cot.id ? null : cot.id);
+          }}
+          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          aria-label="Acciones de cotización"
         >
-          ➕ Hacer Prospecto
+          <MoreVertical size={18} />
         </button>
-      )}
+        {menuHistorialId === cot.id && (
+          <div className="absolute right-0 z-20 mt-1 w-52 bg-white rounded-xl shadow-lg border border-slate-100 py-1">
+            <button
+              type="button"
+              onClick={() => {
+                setMenuHistorialId(null);
+                aplicarReplicacion(cot);
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Replicar cotización
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuHistorialId(null);
+                setModalDestino({
+                  modo: 'historial',
+                  cotizacion: cot,
+                  nombreInicial: cot.lead_nombre || '',
+                  pasoInicial: 'elegir',
+                });
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Nuevo lead
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuHistorialId(null);
+                setModalDestino({
+                  modo: 'historial',
+                  cotizacion: cot,
+                  nombreInicial: cot.lead_nombre || '',
+                  pasoInicial: 'existente',
+                });
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              Vincular a lead existente
+            </button>
+          </div>
+        )}
+      </div>
     </td>
   </tr>
 ))}
@@ -1078,6 +1317,34 @@ const CotizadorView = () => {
           </table>
         </div>
       </div>
+
+      <ModalDestinoProspecto
+        abierto={Boolean(modalDestino)}
+        titulo={modalDestino?.modo === 'historial' ? 'Vincular cotización a prospecto' : '¿Cómo guardar la cotización?'}
+        subtitulo={
+          modalDestino?.modo === 'historial'
+            ? `Folio FL-${String(modalDestino?.cotizacion?.folio || 0).padStart(3, '0')}. Solo un folio activo por lead; los demás se liberan.`
+            : `Cliente: ${formData.nombre_cliente}. Elige si creas un lead nuevo, vinculas a uno existente o solo guardas el folio.`
+        }
+        modo={modalDestino?.modo === 'historial' ? 'historial' : 'guardar'}
+        nombreCliente={formData.nombre_cliente}
+        nombreInicial={modalDestino?.nombreInicial || ''}
+        pedirNombre={modalDestino?.modo === 'historial'}
+        pasoInicial={modalDestino?.pasoInicial || 'elegir'}
+        leads={leads}
+        onCerrar={() => setModalDestino(null)}
+        onConfirmar={resolverModalDestino}
+      />
+
+      {puedeAdministrarGps && (
+        <AdminGpsCatalogoPanel
+          abierto={panelGpsAbierto}
+          onCerrar={() => setPanelGpsAbierto(false)}
+          empresaId={empresaId}
+          catalogo={gpsCatalogo}
+          onCatalogoActualizado={setGpsCatalogo}
+        />
+      )}
 
     </div>
   );

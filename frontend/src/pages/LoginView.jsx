@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { auth } from '../firebase'; // Importamos tu configuración de Firebase
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import api from '../api';
+import {
+  CLAVE_USUARIO,
+  consumirMensajeLogin,
+  MENSAJES_LOGIN,
+} from '../lib/sesion';
 
 function LoginView({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -9,7 +14,15 @@ function LoginView({ onLogin }) {
   const [error, setError] = useState('');
   const [mensajeExito, setMensajeExito] = useState(''); 
   const [cargando, setCargando] = useState(false);
-  const [cargandoRecuperacion, setCargandoRecuperacion] = useState(false); 
+  const [cargandoRecuperacion, setCargandoRecuperacion] = useState(false);
+  const [avisoSesion, setAvisoSesion] = useState('');
+
+  useEffect(() => {
+    const tipo = consumirMensajeLogin();
+    if (tipo && MENSAJES_LOGIN[tipo]) {
+      setAvisoSesion(MENSAJES_LOGIN[tipo]);
+    }
+  }, []);
 
 const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,7 +45,7 @@ const handleSubmit = async (e) => {
       const usuarioOficial = respuestaBD.data.usuario;
 
       // 4. Guardamos sesión y te dejamos entrar al CRM
-      localStorage.setItem('usuarioCRM', JSON.stringify(usuarioOficial));
+      localStorage.setItem(CLAVE_USUARIO, JSON.stringify(usuarioOficial));
       if (onLogin) onLogin(usuarioOficial);
 
     } catch (err) {
@@ -94,6 +107,13 @@ const handleSubmit = async (e) => {
             <h2 className="text-2xl font-extrabold text-slate-800">Bienvenido al CRM</h2>
             <p className="text-slate-500 mt-2 text-sm">Ingresa tus credenciales para continuar</p>
           </div>
+
+          {avisoSesion && (
+            <div className="bg-amber-50 text-amber-800 p-4 rounded-xl text-sm mb-6 border border-amber-100 flex items-center gap-2 animate-in slide-in-from-top-2">
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+              <span className="font-medium">{avisoSesion}</span>
+            </div>
+          )}
 
           {/* Alerta de Error */}
           {error && (

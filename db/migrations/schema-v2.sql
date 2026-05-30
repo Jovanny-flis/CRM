@@ -14,6 +14,10 @@
 --   • lead_estatus + leads.estatus_id (estatus de prospectos)
 --   • Semilla activo/cancelado y asignación estatus_id en leads existentes
 --   • lead_etapas_historial (timestamps por etapa alcanzada hacia adelante)
+--   • cotizaciones: folio (AUTO_INCREMENT), nombre_activo, marca, modelo, version, anio
+--   • cotizaciones: parámetros del cotizador (tasa, pagos, seguro, GPS, etc.) para réplica idéntica
+--   • gps_proveedores + gps_productos — catálogo GPS por empresa (cotizador)
+--   • leads: tipo_persona (PM | PF | PFAE, opcional)
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
 --   • lib/canales.js — catálogo raíz al crear empresa (POST /empresas); no re-sembrar en GET /medios
@@ -135,6 +139,7 @@ CREATE TABLE IF NOT EXISTS `lead_estatus` (
   `color_hex` varchar(7) DEFAULT NULL COMMENT 'NULL = sin color (neutro)',
   `incluir_en_suma` tinyint(1) NOT NULL DEFAULT 1,
   `permite_mover` tinyint(1) NOT NULL DEFAULT 1,
+  `bloquea_cotizacion` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Congela folio: sin vincular ni cambiar cotización',
   `es_sistema` tinyint(1) NOT NULL DEFAULT 0,
   `orden` int(11) NOT NULL DEFAULT 0,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
@@ -143,6 +148,11 @@ CREATE TABLE IF NOT EXISTS `lead_estatus` (
   KEY `idx_lead_estatus_empresa` (`empresa_id`),
   CONSTRAINT `fk_lead_estatus_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CALL crm_add_column_if_missing('lead_estatus', 'bloquea_cotizacion',
+  "tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Congela folio: sin vincular ni cambiar cotización' AFTER `permite_mover`");
+
+UPDATE `lead_estatus` SET `bloquea_cotizacion` = 1 WHERE `codigo` = 'cancelado';
 
 -- -----------------------------------------------------------------------------
 -- 4) leads.estatus_id
@@ -214,9 +224,9 @@ DROP PROCEDURE IF EXISTS `crm_dml_leads_medio_contacto_directo`;
 -- -----------------------------------------------------------------------------
 INSERT INTO `lead_estatus` (
   `id`, `empresa_id`, `codigo`, `nombre`, `color_hex`,
-  `incluir_en_suma`, `permite_mover`, `es_sistema`, `orden`
+  `incluir_en_suma`, `permite_mover`, `bloquea_cotizacion`, `es_sistema`, `orden`
 )
-SELECT UUID(), e.`id`, 'activo', 'Activo', NULL, 1, 1, 1, 0
+SELECT UUID(), e.`id`, 'activo', 'Activo', NULL, 1, 1, 0, 1, 0
 FROM `empresas` e
 WHERE NOT EXISTS (
   SELECT 1 FROM `lead_estatus` le
@@ -225,9 +235,9 @@ WHERE NOT EXISTS (
 
 INSERT INTO `lead_estatus` (
   `id`, `empresa_id`, `codigo`, `nombre`, `color_hex`,
-  `incluir_en_suma`, `permite_mover`, `es_sistema`, `orden`
+  `incluir_en_suma`, `permite_mover`, `bloquea_cotizacion`, `es_sistema`, `orden`
 )
-SELECT UUID(), e.`id`, 'cancelado', 'Cancelado', '#94a3b8', 0, 0, 1, 9999
+SELECT UUID(), e.`id`, 'cancelado', 'Cancelado', '#94a3b8', 0, 0, 1, 1, 9999
 FROM `empresas` e
 WHERE NOT EXISTS (
   SELECT 1 FROM `lead_estatus` le
@@ -258,6 +268,98 @@ CREATE TABLE IF NOT EXISTS `lead_etapas_historial` (
 
 -- Marcar migración unificada aplicada
 INSERT IGNORE INTO `_crm_migraciones` (`clave`) VALUES ('schema_v2_unificado');
+
+-- -----------------------------------------------------------------------------
+-- 8) cotizaciones — columnas de folio, activo automotriz y vínculo a lead
+-- -----------------------------------------------------------------------------
+-- folio: identificador secuencial visible (FL-001, FL-002, …)
+CALL crm_add_column_if_missing('cotizaciones', 'folio',
+  "INT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE AFTER `id`");
+
+-- nombre_activo: descripción libre del bien cotizado
+CALL crm_add_column_if_missing('cotizaciones', 'nombre_activo',
+  "VARCHAR(200) NULL AFTER `tipo_activo`");
+
+-- marca / modelo / anio: campos específicos para tipo Automotriz
+CALL crm_add_column_if_missing('cotizaciones', 'marca',
+  "VARCHAR(100) NULL AFTER `nombre_activo`");
+CALL crm_add_column_if_missing('cotizaciones', 'modelo',
+  "VARCHAR(100) NULL AFTER `marca`");
+CALL crm_add_column_if_missing('cotizaciones', 'version',
+  "VARCHAR(100) NULL COMMENT 'Versión del vehículo (automotriz)' AFTER `modelo`");
+CALL crm_add_column_if_missing('cotizaciones', 'anio',
+  "INT NULL AFTER `version`");
+
+-- -----------------------------------------------------------------------------
+-- 9) leads — tipo de persona del prospecto (opcional)
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('leads', 'tipo_persona',
+  "VARCHAR(4) NULL DEFAULT NULL COMMENT 'PM | PF | PFAE' AFTER `medio`");
+
+-- -----------------------------------------------------------------------------
+-- 10) cotizaciones — parámetros completos del cotizador (réplica idéntica)
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('cotizaciones', 'tipo_arrendamiento',
+  "VARCHAR(20) NULL COMMENT 'Automotriz | Otro' AFTER `tipo_activo`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'tasa_anual',
+  "DECIMAL(5,2) NULL AFTER `plazo`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'pago_inicial_valor',
+  "DECIMAL(12,4) NULL COMMENT 'Valor capturado en formulario (monto o %)' AFTER `tasa_anual`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_pago_inicial_pct',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `pago_inicial_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'residual_valor',
+  "DECIMAL(12,4) NULL AFTER `is_pago_inicial_pct`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_residual_pct',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `residual_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'comision_valor',
+  "DECIMAL(12,4) NULL AFTER `is_residual_pct`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_comision_pct',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `comision_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'seguro_valor',
+  "DECIMAL(12,4) NULL AFTER `is_comision_pct`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_seguro_contado',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `seguro_valor`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_seguro_anual',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `is_seguro_contado`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'gps_valor',
+  "DECIMAL(12,4) NULL AFTER `is_seguro_anual`");
+CALL crm_add_column_if_missing('cotizaciones', 'is_gps_contado',
+  "TINYINT(1) NULL DEFAULT 1 AFTER `gps_valor`");
+
+CALL crm_add_column_if_missing('cotizaciones', 'servicios_valor',
+  "DECIMAL(12,4) NULL AFTER `is_gps_contado`");
+
+-- -----------------------------------------------------------------------------
+-- 11) Catálogo GPS por empresa (proveedores → productos con precio IVA incl.)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `gps_proveedores` (
+  `id` varchar(36) NOT NULL,
+  `empresa_id` int(11) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_gps_proveedor_empresa_nombre` (`empresa_id`, `nombre`),
+  KEY `idx_gps_proveedores_empresa` (`empresa_id`),
+  CONSTRAINT `fk_gps_proveedores_empresa` FOREIGN KEY (`empresa_id`) REFERENCES `empresas` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `gps_productos` (
+  `id` varchar(36) NOT NULL,
+  `proveedor_id` varchar(36) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `precio` decimal(12,4) NOT NULL COMMENT 'Precio con IVA incluido',
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_gps_producto_proveedor_nombre` (`proveedor_id`, `nombre`),
+  KEY `idx_gps_productos_proveedor` (`proveedor_id`),
+  CONSTRAINT `fk_gps_productos_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `gps_proveedores` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)
