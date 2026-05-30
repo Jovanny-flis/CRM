@@ -76,6 +76,8 @@ export const formDataCotizadorVacio = () => ({
   gps: '',
   isGpsContado: true,
   servicios: '',
+  isRentasDeposito: false,
+  rentasDepositoCantidad: '',
 });
 
 const inferirTipoArrendamiento = (cot) => {
@@ -132,6 +134,8 @@ export const cotizacionAFormData = (cot, { paraReplicar = false } = {}) => {
     gps: automotriz && cot.gps_valor != null ? numeroAString(cot.gps_valor) : '',
     isGpsContado: boolDesdeBd(cot.is_gps_contado, true),
     servicios: automotriz && cot.servicios_valor != null ? numeroAString(cot.servicios_valor) : '',
+    isRentasDeposito: boolDesdeBd(cot.is_rentas_deposito, false),
+    rentasDepositoCantidad: cot.rentas_deposito_cantidad != null ? String(cot.rentas_deposito_cantidad) : '',
   };
 };
 
@@ -179,6 +183,9 @@ export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId
     servicios_valor: esArrendamientoAutomotriz(formData.tipoArrendamiento)
       ? parseNumeroFormulario(formData.servicios)
       : 0,
+      is_rentas_deposito: formData.isRentasDeposito ? 1 : 0,
+    rentas_deposito_cantidad: parseInt(formData.rentasDepositoCantidad, 10) || 0,
+    rentas_deposito_valor: res.rentasDepositoValor || 0,
     porcentaje_vr: formData.isResidualPct ? parseNumeroFormulario(formData.residual) : 0,
     vr_calculado: res.residualReal,
     pago_inicial: res.pagoInicialTotal,

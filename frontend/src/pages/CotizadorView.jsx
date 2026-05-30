@@ -272,7 +272,7 @@ const CotizadorView = () => {
       } else if (destino.tipo === 'existente') {
         finalLeadId = destino.leadId;
       }
-
+        formData.usuario_id = usuarioLogueado.id;
       const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
         empresaId,
         usuarioId: usuarioLogueado.id,
@@ -397,13 +397,28 @@ const CotizadorView = () => {
     const rentaMensualIVA = rentaMensualSubtotal * 0.16;
     const rentaMensualTotal = rentaMensualSubtotal + rentaMensualIVA;
 
-    const pagoInicialSubtotal = pagoInicialSub + comisionSub + seguroSub + gpsSub + serviciosSub;
+// 1. NUEVA LÓGICA: Rentas en Depósito
+    const isRentas = formData.isRentasDeposito === true;
+    const cantidadRentas = parseInt(formData.rentasDepositoCantidad, 10) || 0;
+    
+    // Calculamos el subtotal de estas rentas (usando la renta SIN IVA)
+    const rentasDepositoSubtotal = isRentas ? (rentaMensualSubtotal * cantidadRentas) : 0;
+    
+    // Calculamos el total de las rentas (para guardarlo en la base de datos)
+    const rentasDepositoValor = isRentas ? (rentaMensualTotal * cantidadRentas) : 0;
+
+    // 2. Cálculos del Desembolso Inicial (Ahora sí, desglosado desde la raíz)
+    const pagoInicialSubtotal = pagoInicialSub + comisionSub + seguroSub + gpsSub + serviciosSub + rentasDepositoSubtotal;
     const pagoInicialIVA = pagoInicialSubtotal * 0.16;
     const pagoInicialTotal = pagoInicialSubtotal + pagoInicialIVA;
 
-    setErrores(err);
+setErrores(err);
     setRes({ 
       residualReal, pagoInicialSub, comisionSub, gpsSub, seguroSub, serviciosSub, 
+      
+      // 👇 AGREGAMOS NUESTRAS NUEVAS VARIABLES AQUÍ 👇
+      rentasDepositoSubtotal, rentasDepositoValor,
+      
       pagoInicialSubtotal, pagoInicialIVA, pagoInicialTotal, rentaSoloActivo, 
       gpsFinMensual, seguroFinMensual, rentaMensualSubtotal, rentaMensualIVA, rentaMensualTotal 
     });
@@ -519,6 +534,10 @@ const CotizadorView = () => {
                 <tr>
                   <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Gestoría trámites vehiculares</td>
                   <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.serviciosSub)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Rentas en depósito</td>
+                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.rentasDepositoSubtotal || 0)}</td>
                 </tr>
                 <tr style="background:#f9f9f9;">
                   <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Servicio y/o mantenimiento</td>
@@ -1012,7 +1031,42 @@ const CotizadorView = () => {
                 <ToggleBtn flag={!formData.isComisionPct} onClick={() => setFormData({...formData, isComisionPct: false})} label="$" />
               </div>
             </div>
+{/* --- NUEVO CAMPO: RENTAS EN DEPÓSITO --- */}
+        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+            Rentas en Depósito (Garantía)
+          </label>
+          
+          <div className="flex items-center mb-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={formData.isRentasDeposito}
+                onChange={e => setFormData({ ...formData, isRentasDeposito: e.target.checked, rentasDepositoCantidad: e.target.checked ? formData.rentasDepositoCantidad : '' })}
+                className="w-4 h-4 accent-blue-600 cursor-pointer"
+              />
+              ¿Solicitar rentas en depósito al inicio?
+            </label>
+          </div>
 
+          {/* Solo mostramos el input si el checkbox está marcado */}
+          {formData.isRentasDeposito && (
+            <div className="flex gap-2 mt-3 animate-fade-in">
+              <input
+                type="number"
+                min="1"
+                placeholder="Cantidad de rentas (ej. 1, 2)"
+                value={formData.rentasDepositoCantidad}
+                onChange={e => setFormData({ ...formData, rentasDepositoCantidad: e.target.value })}
+                className="flex-1 border border-slate-200 rounded-xl px-4 py-2 outline-none"
+              />
+              <div className="flex items-center px-3 bg-slate-200 text-slate-600 rounded-xl text-sm font-bold">
+                Meses
+              </div>
+            </div>
+          )}
+        </div>
+        {/* -------------------------------------- */}
             <div className={`p-4 rounded-xl border ${formData.tipoArrendamiento === 'Automotriz' ? 'bg-slate-50 border-slate-100' : 'bg-slate-100/80 border-slate-200'}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Trámites e impuestos
@@ -1124,6 +1178,15 @@ const CotizadorView = () => {
               <div className="flex justify-between text-sm"><span>GPS:</span><span>{formatoMoneda(res.gpsSub)}</span></div>
               <div className="flex justify-between text-sm text-slate-300"><span>Seguro:</span><span>{formatoMoneda(res.seguroSub)}</span></div>
               <div className="flex justify-between text-sm"><span>Trámites:</span><span>{formatoMoneda(res.serviciosSub)}</span></div>
+              {/* NUEVO DESGLOSE: Rentas en depósito */}
+{formData.isRentasDeposito && (
+  <div className="flex justify-between mb-2"> {/* OJO: Usa el mismo className que tenga la línea de arriba de "Trámites" para que los colores coincidan */}
+    <span className="text-gray-400">
+      Rentas dep. ({formData.rentasDepositoCantidad}):
+    </span>
+    <span>{formatoMoneda(res.rentasDepositoSubtotal || 0)}</span>
+  </div>
+)}
               <div className="flex justify-between font-bold pt-2 border-t border-slate-700"><span>Subtotal:</span><span>{formatoMoneda(res.pagoInicialSubtotal)}</span></div>
               <div className="flex justify-between text-sm text-slate-400"><span>IVA:</span><span>{formatoMoneda(res.pagoInicialIVA)}</span></div>
             </div>

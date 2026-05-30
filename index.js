@@ -31,6 +31,7 @@ const { normalizarTipoPersona } = require('./lib/leads');
 const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
 const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
 const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
+const reporteMaestro = require('./lib/reporteMaestro');
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -58,6 +59,8 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+
+app.use(reporteMaestro);
 
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
 // super_admin pasa siempre. El resto debe coincidir con su empresa_id.
@@ -393,7 +396,7 @@ app.delete('/api/empresas/:id',verificarToken, revisarRol(['super_admin']),(req,
 
 
 // Obtener TODOS los Pipelines de una empresa (quitamos el LIMIT 1)
-app.get('/api/pipelines/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), (req, res) => {
+app.get('/api/pipelines/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente','agente_cotizador']), validarEmpresaParam('empresa_id'), (req, res) => {
     const { empresa_id } = req.params;
     pool.query('SELECT * FROM pipelines WHERE empresa_id = ? ORDER BY nombre ASC', [empresa_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -424,7 +427,7 @@ app.post('/api/pipelines', verificarToken, revisarRol(['super_admin','supervisor
 // NUEVO: Editar nombre y clave de un Pipeline
 app.put('/api/pipelines/:id',
     verificarToken,
-    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    revisarRol(['super_admin','supervisor','admin_empresa','agente','agente_cotizador']),
     validarRecursoEmpresa('SELECT empresa_id FROM pipelines WHERE id = ?'),
     (req, res) => {
     const { id } = req.params;
@@ -466,7 +469,7 @@ app.post('/api/etapas', verificarToken, revisarRol(['super_admin','supervisor','
 // Obtener las etapas de un pipeline
 app.get('/api/etapas/:pipeline_id',
     verificarToken,
-    revisarRol(['super_admin','supervisor','admin_empresa','agente']),
+    revisarRol(['super_admin','supervisor','admin_empresa','agente','agente_cotizador']),
     validarRecursoEmpresa('SELECT empresa_id FROM pipelines WHERE id = ?', 'pipeline_id'),
     (req, res) => {
     const { pipeline_id } = req.params;
@@ -772,7 +775,7 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
 });
 
 // Crear un nuevo prospecto (Lead)
-app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), async (req, res) => {
+app.post('/api/leads', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente','agente_cotizador']), async (req, res) => {
     const { empresa_id, nombre, correo, telefono, valor, medio, stage_id, usuario_id, tipo_persona } = req.body;
 
     if (!puedeOperarEnEmpresa(req.usuarioCRM, empresa_id)) {
@@ -947,7 +950,7 @@ app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
 });
 
 
-app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente']), validarEmpresaParam('empresa_id'), async (req, res) => {
+app.get('/api/medios/:empresa_id', verificarToken, revisarRol(['super_admin','supervisor','admin_empresa','agente','agente_cotizador']), validarEmpresaParam('empresa_id'), async (req, res) => {
     const { empresa_id } = req.params;
 
     try {
@@ -1093,7 +1096,7 @@ app.delete('/api/medios/:id',
 // CATÁLOGO GPS (COTIZADOR)
 // ==========================================
 
-const ROLES_CATALOGO_GPS_LECTURA = ['super_admin', 'supervisor', 'admin_empresa', 'agente'];
+const ROLES_CATALOGO_GPS_LECTURA = ['super_admin', 'supervisor', 'admin_empresa', 'agente','agente_cotizador'];
 const ROLES_CATALOGO_GPS_EDICION = ['super_admin', 'supervisor', 'admin_empresa'];
 
 app.get('/api/gps-catalogo/:empresa_id',
@@ -1488,8 +1491,8 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     `;
     
     const params = [empresa_id];
-
-    if (rol === 'agente') {
+// Aplicamos el filtro si es agente o si es agente_cotizador
+    if (rol === 'agente' || rol === 'agente_cotizador') {
         query += ` AND c.usuario_id = ?`;
         params.push(usuario_id);
     }
