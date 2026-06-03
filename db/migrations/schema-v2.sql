@@ -214,7 +214,7 @@ BEGIN
     UPDATE `leads` SET `medio` = 'Contacto directo';
     INSERT INTO `_crm_migraciones` (`clave`) VALUES ('leads_medio_contacto_directo');
   END IF;
-END$$s
+END$$
 DELIMITER ;
 CALL `crm_dml_leads_medio_contacto_directo`();
 DROP PROCEDURE IF EXISTS `crm_dml_leads_medio_contacto_directo`;
