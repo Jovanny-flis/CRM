@@ -214,7 +214,7 @@ BEGIN
     UPDATE `leads` SET `medio` = 'Contacto directo';
     INSERT INTO `_crm_migraciones` (`clave`) VALUES ('leads_medio_contacto_directo');
   END IF;
-END$$
+END$$s
 DELIMITER ;
 CALL `crm_dml_leads_medio_contacto_directo`();
 DROP PROCEDURE IF EXISTS `crm_dml_leads_medio_contacto_directo`;
@@ -361,6 +361,21 @@ CREATE TABLE IF NOT EXISTS `gps_productos` (
   CONSTRAINT `fk_gps_productos_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `gps_proveedores` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------
+-- 12 Columnas de rentas en deposito para cotizacionea
+
+CALL crm_add_column_if_missing('cotizaciones', 'is_rentas_deposito', 
+  'TINYINT(1) NULL DEFAULT 0');
+
+CALL crm_add_column_if_missing('cotizaciones', 'rentas_deposito_cantidad', 
+  'INT NULL DEFAULT 0');
+
+CALL crm_add_column_if_missing('cotizaciones', 'rentas_deposito_valor', 
+  'DECIMAL(12,4) NULL DEFAULT 0');
+
+
+-- Modificar el ENUM de roles en usuarios
+ALTER TABLE usuarios MODIFY COLUMN rol ENUM('super_admin', 'admin_empresa', 'supervisor', 'agente', 'agente_cotizador') DEFAULT 'agente';
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
