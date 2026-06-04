@@ -14,6 +14,7 @@ import {
   formDataAPayloadCotizacion,
   formDataCotizadorVacio,
   formatMontoEnFormulario,
+  parseNumeroFormulario,
   limpiarCamposSoloAutomotriz,
   archivoImagenActivoPdf,
 } from '../lib/cotizacionFormulario';
@@ -46,7 +47,7 @@ const camposActivoCompletos = (data) => {
 const cotizacionListaParaAccion = (data, erroresCalculo) => {
   if (Object.keys(erroresCalculo).length > 0) return false;
   if (!String(data.nombre_cliente || '').trim()) return false;
-  const valor = parseFloat(String(data.valorActivo || '').replace(/,/g, ''));
+  const valor = parseNumeroFormulario(data.valorActivo);
   if (!valor || valor <= 0) return false;
   return camposActivoCompletos(data);
 };
@@ -348,7 +349,7 @@ const CotizadorView = () => {
           usuarioId: usuarioLogueado.id,
           nombre: destino.nombre || formData.nombre_cliente,
           tipoPersona: formData.tipo_persona || null,
-          valorActivo: parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0,
+          valorActivo: parseNumeroFormulario(formData.valorActivo),
           medio: 'Cotizador',
         });
         cargarLeads();
@@ -438,18 +439,18 @@ const CotizadorView = () => {
   useEffect(() => {
     let err = {};
     // MODIFICADO: Removemos las comas antes de convertir a número para el cálculo
-    const valorActivo = parseFloat(String(formData.valorActivo).replace(/,/g, '')) || 0;
+    const valorActivo = parseNumeroFormulario(formData.valorActivo);
     const plazo = parseInt(formData.plazo) || 36;
     const tasaAnual = parseFloat(formData.tasaAnual) || 0;
 
     if (tasaAnual < 16 || tasaAnual > 40) err.tasa = "La tasa debe estar entre 16% y 40%.";
     if (plazo < 12 || plazo > 72) err.plazo = "El plazo debe ser entre 12 y 72 meses.";
 
-    const piInput = parseFloat(String(formData.pagoInicial).replace(/,/g, '')) || 0;
+    const piInput = parseNumeroFormulario(formData.pagoInicial);
     const inicialReal = formData.isPagoInicialPct ? valorActivo * (piInput / 100) : piInput;
     if (inicialReal > valorActivo * 0.5) err.pagoInicial = "El pago inicial no puede exceder el 50% del valor.";
 
-    const resInput = parseFloat(String(formData.residual).replace(/,/g, '')) || 0;
+    const resInput = parseNumeroFormulario(formData.residual);
     const residualReal = formData.isResidualPct ? valorActivo * (resInput / 100) : resInput;
     
     let maxResidualPermitido = 0;
@@ -464,15 +465,15 @@ const CotizadorView = () => {
     if (residualReal > maxResidualPermitido && valorActivo > 0) err.residual = "Excede el tope permitido.";
     if ((residualReal + inicialReal) > valorActivo && valorActivo > 0) err.general = "Suma inicial + residual excede 100%.";
 
-    const comInput = parseFloat(String(formData.comision).replace(/,/g, '')) || 0;
+    const comInput = parseNumeroFormulario(formData.comision);
     const comisionReal = formData.isComisionPct ? comInput * (valorActivo - inicialReal) / 100 : comInput;
 
     const esAutomotriz = formData.tipoArrendamiento === 'Automotriz';
-    const gpsInput = esAutomotriz ? (parseFloat(String(formData.gps).replace(/,/g, '')) || 0) : 0;
+    const gpsInput = esAutomotriz ? parseNumeroFormulario(formData.gps) : 0;
     const gpsContado = esAutomotriz && formData.isGpsContado ? gpsInput : 0;
-    const serviciosReal = esAutomotriz ? (parseFloat(String(formData.servicios).replace(/,/g, '')) || 0) : 0;
+    const serviciosReal = esAutomotriz ? parseNumeroFormulario(formData.servicios) : 0;
 
-    const seguroInput = parseFloat(String(formData.seguro).replace(/,/g, '')) || 0;
+    const seguroInput = parseNumeroFormulario(formData.seguro);
     let seguroContado = formData.isSeguroContado ? seguroInput : 0;
     let seguroFinanciadoBase = !formData.isSeguroContado ? seguroInput : 0;
 
@@ -593,7 +594,7 @@ setErrores(err);
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PRECIO (IVA INCLUIDO)</td>
-            <td style="padding: 3px 0; color: #444;">${formatoMoneda(parseFloat(String(formData.valorActivo).replace(/,/g, '')))} MXN</td>
+            <td style="padding: 3px 0; color: #444;">${formatoMoneda(parseNumeroFormulario(formData.valorActivo))} MXN</td>
           </tr>
           <tr>
             <td style="padding: 3px 0; font-weight: 700; color: #222;">PLAZO (MESES)</td>
@@ -1175,9 +1176,10 @@ setErrores(err);
                 )}
               </label>
               <input 
-                type="number" 
+                type="text"
+                inputMode="decimal"
                 value={formData.tipoArrendamiento === 'Automotriz' ? formData.servicios : ''} 
-                onChange={e => setFormData({...formData, servicios: e.target.value})} 
+                onChange={e => setFormData({...formData, servicios: formatMontoFormulario(e.target.value)})} 
                 className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400" 
                 disabled={formData.tipoArrendamiento !== 'Automotriz'} 
                 placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
@@ -1190,9 +1192,10 @@ setErrores(err);
                   Seguro
                 </label>
                 <input 
-                  type="number" 
+                  type="text"
+                  inputMode="decimal"
                   value={formData.seguro} 
-                  onChange={e => setFormData({...formData, seguro: e.target.value})} 
+                  onChange={e => setFormData({...formData, seguro: formatMontoFormulario(e.target.value)})} 
                   className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2" 
                 />
                 <div className="flex gap-2 mb-2">
@@ -1227,12 +1230,11 @@ setErrores(err);
                 </div>
                 <div className="flex mb-2">
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={formData.tipoArrendamiento === 'Automotriz' ? formData.gps : ''}
-                    onChange={(e) => setFormData({ ...formData, gps: e.target.value })}
-                    className={`flex-1 min-w-0 border border-slate-200 px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                    onChange={(e) => setFormData({ ...formData, gps: formatMontoFormulario(e.target.value) })}
+                    className={`flex-1 min-w-0 border border-slate-200 px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400 ${
                       muestraCatalogoGps ? 'rounded-l-xl rounded-r-none' : 'rounded-xl'
                     }`}
                     disabled={formData.tipoArrendamiento !== 'Automotriz'}
@@ -1243,7 +1245,7 @@ setErrores(err);
                       catalogo={gpsCatalogo}
                       disabled={formData.tipoArrendamiento !== 'Automotriz'}
                       onSeleccionarPrecio={(precio) =>
-                        setFormData({ ...formData, gps: String(precio) })
+                        setFormData({ ...formData, gps: formatMontoFormulario(String(precio)) })
                       }
                     />
                   )}
