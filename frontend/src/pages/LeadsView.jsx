@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
+import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
 
@@ -40,6 +41,7 @@ function LeadsView() {
   const [sugerenciasCotizaciones, setSugerenciasCotizaciones] = useState([]);
   const [buscandoCotizaciones, setBuscandoCotizaciones] = useState(false);
   const [mostrarBuscadorCotizacion, setMostrarBuscadorCotizacion] = useState(false);
+  const [modalDetalleCotizacionAbierto, setModalDetalleCotizacionAbierto] = useState(false);
   const buscadorRef = useRef(null);
   
   const [formData, setFormData] = useState({
@@ -1088,6 +1090,24 @@ function LeadsView() {
 
                         </div>
 
+                        <div className="flex flex-wrap gap-3 mt-6 pt-4 border-t border-white/10 relative z-10">
+                          <button
+                            type="button"
+                            onClick={() => setModalDetalleCotizacionAbierto(true)}
+                            className="flex-1 min-w-[120px] py-2.5 px-4 rounded-xl text-sm font-bold bg-white/10 hover:bg-white/15 border border-white/20 transition-colors"
+                          >
+                            Detalles
+                          </button>
+                          <button
+                            type="button"
+                            disabled
+                            title="Generación de PDF en actualización"
+                            className="flex-1 min-w-[120px] py-2.5 px-4 rounded-xl text-sm font-bold bg-slate-700 text-slate-400 cursor-not-allowed"
+                          >
+                            Generar PDF
+                          </button>
+                        </div>
+
                         {bloqueaCotizacionEnModal() && (
                           <p className="mt-4 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                             Folio congelado: no se puede vincular ni cambiar cotización en este estatus.
@@ -1190,6 +1210,14 @@ function LeadsView() {
           </div>
         </div>
       )}
+
+      <ModalDetalleCotizacion
+        abierto={modalDetalleCotizacionAbierto && Boolean(leadEditando?.cotizacion_id)}
+        onCerrar={() => setModalDetalleCotizacionAbierto(false)}
+        cotizacionId={leadEditando?.cotizacion_id}
+        prospectoNombre={leadEditando?.nombre}
+        agenteNombre={leadEditando?.agente_nombre}
+      />
 
       {mostrarAvisoCancelacion && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">

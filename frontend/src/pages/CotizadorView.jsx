@@ -5,6 +5,7 @@ import { MoreVertical, Plus, Search } from 'lucide-react';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
 import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
+import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import AdminGpsCatalogoPanel from '../components/AdminGpsCatalogoPanel';
 import SelectorGpsPrecio from '../components/SelectorGpsPrecio';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
@@ -162,6 +163,7 @@ const CotizadorView = () => {
   const [modalDestino, setModalDestino] = useState(null);
   const [referenciaNombreClave, setReferenciaNombreClave] = useState('');
   const [menuHistorialId, setMenuHistorialId] = useState(null);
+  const [detalleCotizacion, setDetalleCotizacion] = useState(null);
   const [busquedaHistorial, setBusquedaHistorial] = useState('');
   const [menuHistorialPanelStyle, setMenuHistorialPanelStyle] = useState(null);
   const menuHistorialTriggerRef = useRef(null);
@@ -1443,6 +1445,16 @@ setErrores(err);
             type="button"
             onClick={() => {
               setMenuHistorialId(null);
+              setDetalleCotizacion(cotizacionMenuHistorialAbierta);
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Detalles
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuHistorialId(null);
               aplicarReplicacion(cotizacionMenuHistorialAbierta);
             }}
             className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
@@ -1482,6 +1494,15 @@ setErrores(err);
         </div>,
         document.body,
       )}
+
+      <ModalDetalleCotizacion
+        abierto={Boolean(detalleCotizacion)}
+        onCerrar={() => setDetalleCotizacion(null)}
+        cotizacionInicial={detalleCotizacion}
+        cotizacionId={detalleCotizacion?.id}
+        prospectoNombre={detalleCotizacion?.lead_nombre}
+        agenteNombre={detalleCotizacion?.agente_nombre}
+      />
 
       <ModalDestinoProspecto
         abierto={Boolean(modalDestino)}
