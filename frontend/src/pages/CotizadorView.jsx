@@ -62,6 +62,11 @@ const variantesFolioHistorial = (folio) => {
   return `fl-${padded} ${padded} ${num}`.toLowerCase();
 };
 
+const folioHistorialTexto = (folio) =>
+  (folio != null && folio !== '')
+    ? `FL-${String(folio).padStart(3, '0')}`
+    : 'esta cotización';
+
 const cotizacionCoincideBusquedaHistorial = (cot, termino) => {
   const q = normalizarBusquedaHistorial(termino);
   if (!q) return true;
@@ -161,6 +166,7 @@ const CotizadorView = () => {
   const [formData, setFormData] = useState(formDataCotizadorVacio);
   const [folioOrigenReplicacion, setFolioOrigenReplicacion] = useState(null);
   const [modalDestino, setModalDestino] = useState(null);
+  const [confirmacionHistorialDestino, setConfirmacionHistorialDestino] = useState(null);
   const [referenciaNombreClave, setReferenciaNombreClave] = useState('');
   const [menuHistorialId, setMenuHistorialId] = useState(null);
   const [detalleCotizacion, setDetalleCotizacion] = useState(null);
@@ -410,6 +416,23 @@ const CotizadorView = () => {
     } else {
       ejecutarGestionHistorial(ctx.cotizacion, destino);
     }
+  };
+
+  const solicitarDestinoHistorial = (cotizacion, pasoInicial) => {
+    setMenuHistorialId(null);
+    setConfirmacionHistorialDestino({ cotizacion, pasoInicial });
+  };
+
+  const confirmarDestinoHistorial = () => {
+    const ctx = confirmacionHistorialDestino;
+    if (!ctx) return;
+    setConfirmacionHistorialDestino(null);
+    setModalDestino({
+      modo: 'historial',
+      cotizacion: ctx.cotizacion,
+      nombreInicial: ctx.cotizacion.lead_nombre || '',
+      pasoInicial: ctx.pasoInicial,
+    });
   };
 
   useEffect(() => {
@@ -1463,30 +1486,14 @@ setErrores(err);
           </button>
           <button
             type="button"
-            onClick={() => {
-              setMenuHistorialId(null);
-              setModalDestino({
-                modo: 'historial',
-                cotizacion: cotizacionMenuHistorialAbierta,
-                nombreInicial: cotizacionMenuHistorialAbierta.lead_nombre || '',
-                pasoInicial: 'elegir',
-              });
-            }}
+            onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'elegir')}
             className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
             Nuevo lead
           </button>
           <button
             type="button"
-            onClick={() => {
-              setMenuHistorialId(null);
-              setModalDestino({
-                modo: 'historial',
-                cotizacion: cotizacionMenuHistorialAbierta,
-                nombreInicial: cotizacionMenuHistorialAbierta.lead_nombre || '',
-                pasoInicial: 'existente',
-              });
-            }}
+            onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'existente')}
             className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
             Vincular a lead existente
@@ -1503,6 +1510,72 @@ setErrores(err);
         prospectoNombre={detalleCotizacion?.lead_nombre}
         agenteNombre={detalleCotizacion?.agente_nombre}
       />
+
+      {confirmacionHistorialDestino && (
+        <div
+          className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="aviso-historial-destino-titulo"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+            <h2
+              id="aviso-historial-destino-titulo"
+              className="text-slate-900 font-bold text-lg mb-3"
+            >
+              Cambiar prospecto de la cotización
+            </h2>
+            <p className="text-slate-700 text-sm leading-relaxed">
+              {String(confirmacionHistorialDestino.cotizacion.lead_nombre || '').trim() ? (
+                <>
+                  La cotización{' '}
+                  <strong>
+                    {folioHistorialTexto(confirmacionHistorialDestino.cotizacion.folio)}
+                  </strong>{' '}
+                  se desvinculará del prospecto actual{' '}
+                  <span className="font-semibold text-blue-700">
+                    {confirmacionHistorialDestino.cotizacion.lead_nombre}
+                  </span>{' '}
+                  y se asignará{' '}
+                  {confirmacionHistorialDestino.pasoInicial === 'elegir'
+                    ? 'al nuevo prospecto que crees'
+                    : 'al prospecto existente que selecciones'}
+                  .
+                </>
+              ) : (
+                <>
+                  La cotización{' '}
+                  <strong>
+                    {folioHistorialTexto(confirmacionHistorialDestino.cotizacion.folio)}
+                  </strong>{' '}
+                  se asignará{' '}
+                  {confirmacionHistorialDestino.pasoInicial === 'elegir'
+                    ? 'al nuevo prospecto que crees'
+                    : 'al prospecto existente que selecciones'}
+                  . Si tenía otra vinculación previa, dejará de estar activa en ese prospecto.
+                </>
+              )}
+              {' '}Solo puede haber un folio activo por lead. ¿Desea continuar?
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmacionHistorialDestino(null)}
+                className="flex-1 px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarDestinoHistorial}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ModalDestinoProspecto
         abierto={Boolean(modalDestino)}
