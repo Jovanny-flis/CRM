@@ -300,9 +300,7 @@ function PanelDetalleCotizacion({
             title={
               !tieneProspecto
                 ? 'Vincula la cotización a un prospecto para generar el PDF'
-                : !onGenerarPdf
-                  ? 'Generación de PDF en actualización'
-                  : undefined
+                : undefined
             }
             className={`w-full py-3.5 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
               puedePdf && !generandoPdf

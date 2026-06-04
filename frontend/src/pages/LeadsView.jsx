@@ -6,6 +6,7 @@ import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
+import { descargarPdfPorCotizacionId } from '../lib/generarPdfCotizacion';
 
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
@@ -42,6 +43,7 @@ function LeadsView() {
   const [buscandoCotizaciones, setBuscandoCotizaciones] = useState(false);
   const [mostrarBuscadorCotizacion, setMostrarBuscadorCotizacion] = useState(false);
   const [modalDetalleCotizacionAbierto, setModalDetalleCotizacionAbierto] = useState(false);
+  const [generandoPdf, setGenerandoPdf] = useState(false);
   const buscadorRef = useRef(null);
   
   const [formData, setFormData] = useState({
@@ -168,6 +170,22 @@ function LeadsView() {
     if (leadBloqueaCotizacion(leadEditando)) return true;
     const est = estatusList.find((e) => String(e.id) === String(formData.estatus_id));
     return estatusBloqueaCotizacion(est);
+  };
+
+  const handleGenerarPdf = async () => {
+    if (!leadEditando?.cotizacion_id || generandoPdf) return;
+    setGenerandoPdf(true);
+    try {
+      await descargarPdfPorCotizacionId(leadEditando.cotizacion_id, {
+        nombreProspecto: leadEditando.nombre,
+        folio: leadEditando.cotizacion_folio,
+      });
+    } catch (error) {
+      console.error('Error al generar PDF:', error);
+      alert(error.message || 'No se pudo generar el PDF. Intenta de nuevo.');
+    } finally {
+      setGenerandoPdf(false);
+    }
   };
 
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
@@ -1100,11 +1118,15 @@ function LeadsView() {
                           </button>
                           <button
                             type="button"
-                            disabled
-                            title="Generación de PDF en actualización"
-                            className="flex-1 min-w-[120px] py-2.5 px-4 rounded-xl text-sm font-bold bg-slate-700 text-slate-400 cursor-not-allowed"
+                            onClick={handleGenerarPdf}
+                            disabled={generandoPdf}
+                            className={`flex-1 min-w-[120px] py-2.5 px-4 rounded-xl text-sm font-bold transition-colors ${
+                              generandoPdf
+                                ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                : 'bg-[#ea5533] hover:opacity-90 text-white'
+                            }`}
                           >
-                            Generar PDF
+                            {generandoPdf ? 'Generando PDF…' : 'Generar PDF'}
                           </button>
                         </div>
 
@@ -1217,6 +1239,8 @@ function LeadsView() {
         cotizacionId={leadEditando?.cotizacion_id}
         prospectoNombre={leadEditando?.nombre}
         agenteNombre={leadEditando?.agente_nombre}
+        onGenerarPdf={handleGenerarPdf}
+        generandoPdf={generandoPdf}
       />
 
       {mostrarAvisoCancelacion && (

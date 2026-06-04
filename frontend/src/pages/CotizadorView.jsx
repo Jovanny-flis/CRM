@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MoreVertical, Plus, Search } from 'lucide-react';
 import api from '../api';
-import html2pdf from 'html2pdf.js';
 import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import AdminGpsCatalogoPanel from '../components/AdminGpsCatalogoPanel';
@@ -16,8 +15,11 @@ import {
   formatMontoEnFormulario,
   parseNumeroFormulario,
   limpiarCamposSoloAutomotriz,
-  archivoImagenActivoPdf,
 } from '../lib/cotizacionFormulario';
+import {
+  descargarPdfPreview,
+  generarPdfDesdeCotizacion,
+} from '../lib/generarPdfCotizacion';
 import {
   claveNombreLead,
   crearLeadOportunidad,
@@ -25,18 +27,7 @@ import {
   vincularCotizacionActiva,
 } from '../lib/destinoProspectoCotizacion';
 
-/** A4 @ 96dpi — dimensiones fijas para PDF consistente entre navegadores */
-const PDF_ANCHO_PX = 794;
-const PDF_ALTO_A4_PX = 1122;
-const PDF_ESCALA_CANVAS = 2;
-
 /** Automotriz: marca - modelo - version - año */
-const armarNombreActivoAutomotriz = ({ marca, modelo, version, anio }) =>
-  [marca, modelo, version, anio]
-    .map((s) => String(s || '').trim())
-    .filter(Boolean)
-    .join(' - ');
-
 const camposActivoCompletos = (data) => {
   if (data.tipoArrendamiento === 'Automotriz') {
     return ['marca', 'modelo', 'version', 'anio'].every((k) => String(data[k] || '').trim() !== '');
@@ -82,43 +73,6 @@ const cotizacionCoincideBusquedaHistorial = (cot, termino) => {
   return folioTxt.includes(q) || (qFolio !== '' && folioTxt.includes(qFolio));
 };
 
-const esperarRecursosPdf = (elemento) => {
-  const promesas = [];
-  if (document.fonts?.ready) promesas.push(document.fonts.ready);
-  elemento.querySelectorAll('img').forEach((img) => {
-    if (img.complete) return;
-    promesas.push(
-      new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve;
-      })
-    );
-  });
-  return Promise.all(promesas);
-};
-
-const montarContenedorPdf = (htmlContent) => {
-  const wrapper = document.createElement('div');
-  wrapper.setAttribute('aria-hidden', 'true');
-  wrapper.style.cssText = [
-    'position:fixed',
-    'left:-10000px',
-    'top:0',
-    `width:${PDF_ANCHO_PX}px`,
-    'overflow:hidden',
-    'background:#fff',
-    'z-index:-1',
-  ].join(';');
-
-  const host = document.createElement('div');
-  host.innerHTML = htmlContent;
-  wrapper.appendChild(host);
-  document.body.appendChild(wrapper);
-
-  const root = host.firstElementChild;
-  return { wrapper, root };
-};
-
 // --- TABLAS DE TOPES RESIDUALES ---
 const tablaResidual = [
   { min: 12, max: 12, valores: { Sedan: 67, SUV: 70, Camionetas: 68, Lujo: 60, Tractocamion: 65, Autobus: 65 }},
@@ -158,6 +112,8 @@ const CotizadorView = () => {
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [generandoPdf, setGenerandoPdf] = useState(false);
+  const [avisoPdfVivoAbierto, setAvisoPdfVivoAbierto] = useState(false);
+  const [generandoPdfDetalle, setGenerandoPdfDetalle] = useState(false);
 
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
@@ -530,302 +486,34 @@ setErrores(err);
     setModalDestino({ modo: 'guardar' });
   };
 
-  const imprimirPDF = async () => {
+  const solicitarPdfVivo = () => {
     if (!puedeGuardarOPdf || generandoPdf) return;
+    setAvisoPdfVivoAbierto(true);
+  };
 
+  const ejecutarPdfVivo = async () => {
+    setAvisoPdfVivoAbierto(false);
     setGenerandoPdf(true);
-    let wrapper = null;
-
-    const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
-      ? armarNombreActivoAutomotriz(formData)
-      : formData.nombreActivo.trim();
-
-    const fechaHoy = new Date().toLocaleDateString('es-MX', {
-      day: '2-digit', month: 'long', year: 'numeric'
-    });
-    const logoUrl = `${window.location.origin}/branding/flising-logo-blanco.png`;
-    const imagenActivoUrl = `${window.location.origin}/cotizacion-activos/${archivoImagenActivoPdf(formData)}`;
-    const etiquetaImagenActivo = formData.tipoArrendamiento === 'Automotriz'
-      ? formData.tipoVehiculo
-      : 'Otro';
-
-    const htmlContent = `
-    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif; font-size: 10px; background: white; width: ${PDF_ANCHO_PX}px; min-height: ${PDF_ALTO_A4_PX}px; margin: 0; padding: 0; display: flex; flex-direction: column; box-sizing: border-box;">
-
-      <!-- BANDA SUPERIOR GRIS: logo + texto izquierda; activo derecha (misma altura de imágenes) -->
-      <div style="background-color: #2c2c2c; padding: 5px 24px 12px 24px; margin: 0;">
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
-          <div style="color: white; flex: 1; min-width: 0;">
-            <img
-              src="${logoUrl}"
-              alt="Flising"
-              style="height: 110px; object-fit: contain; display: block; margin-bottom: 2px;"
-              onerror="this.style.display='none'"
-            />
-            <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">COTIZACIÓN</div>
-            <div style="color: #cccccc; font-size: 10px; line-height: 1.8;">
-              <div><strong style="color: white;">Fecha de expedición</strong>&nbsp;&nbsp;${fechaHoy}</div>
-            </div>
-            <div style="font-size: 10px; color: #cccccc; line-height: 1.5; margin-top: 4px;">
-              Agradecemos tu confianza en Flising, es un gusto atenderte.<br/>
-              A continuación, te presentamos los detalles específicos de tu cotización solicitada.
-            </div>
-          </div>
-          <img
-            src="${imagenActivoUrl}"
-            alt="${etiquetaImagenActivo}"
-            style="height: 200px; max-width: 270px; object-fit: contain; flex-shrink: 0;"
-            onerror="this.style.display='none'"
-          />
-        </div>
-      </div>
-
-      <!-- DATOS DEL CLIENTE: fuera de la banda gris, sobre fondo blanco -->
-      <div style="background-color: white; padding: 12px 24px 10px 24px; border-bottom: 2px solid #e0e0e0;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-          <tr>
-            <td style="padding: 3px 0; width: 180px; font-weight: 700; color: #222;">NOMBRE DEL CLIENTE</td>
-            <td style="padding: 3px 0; color: #444;">${formData.nombre_cliente || 'A quien corresponda'}</td>
-          </tr>
-          <tr>
-            <td style="padding: 3px 0; font-weight: 700; color: #222;">PRODUCTO/VEHÍCULO</td>
-            <!-- AQUÍ IMPRIMIMOS EL NOMBRE QUE ELEGIMOS ARRIBA EN EL PDF -->
-            <td style="padding: 3px 0; color: #444;">${nombreCombinado || 'No especificado'}</td>
-          </tr>
-          <tr>
-            <td style="padding: 3px 0; font-weight: 700; color: #222;">PRECIO (IVA INCLUIDO)</td>
-            <td style="padding: 3px 0; color: #444;">${formatoMoneda(parseNumeroFormulario(formData.valorActivo))} MXN</td>
-          </tr>
-          <tr>
-            <td style="padding: 3px 0; font-weight: 700; color: #222;">PLAZO (MESES)</td>
-            <td style="padding: 3px 0; color: #444;">${formData.plazo}</td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- TABLAS DE PAGO INICIAL Y RENTA MENSUAL -->
-      <div style="padding: 14px 24px 2px 24px; background: white;">
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr style="vertical-align: top;">
-
-            <!-- PAGO INICIAL -->
-            <td style="width: 49%; padding-right: 8px;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
-                <tr>
-                  <td colspan="2" style="background-color: #ea5533; color: white; padding: 6px 10px; font-weight: 700; font-size: 11px;">
-                    PAGO INICIAL
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Renta Extraordinaria</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.pagoInicialSub)}</td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Comisión por apertura</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.comisionSub)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">GPS</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.gpsSub)}</td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Seguro</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.seguroSub)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Gestoría trámites vehiculares</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.serviciosSub)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Rentas en depósito</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.rentasDepositoSubtotal || 0)}</td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Servicio y/o mantenimiento</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc;"><strong>Subtotal</strong></td>
-                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc; text-align: right; white-space: nowrap;"><strong>${formatoMoneda(res.pagoInicialSubtotal)}</strong></td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px;">IVA</td>
-                  <td style="padding: 5px 8px; text-align: right; white-space: nowrap;">${formatoMoneda(res.pagoInicialIVA)}</td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="background-color: #ea5533; color: white; padding: 6px 10px; font-weight: 700;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <tr>
-                        <td style="font-size: 10.5px;">PAGO TOTAL INICIAL</td>
-                        <td style="text-align: right; white-space: nowrap;">${formatoMoneda(res.pagoInicialTotal)} MXN</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-
-            <!-- RENTA MENSUAL -->
-            <td style="width: 49%; padding-left: 8px;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
-                <tr>
-                  <td colspan="2" style="background-color: #2c2c2c; color: white; padding: 6px 10px; font-weight: 700; font-size: 11px;">
-                    RENTA MENSUAL &nbsp;|&nbsp; PLAZO ${formData.plazo} MESES
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Renta</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.rentaSoloActivo / 1.16)}</td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">GPS</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.gpsFinMensual / 1.16)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Seguro</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${formatoMoneda(res.seguroFinMensual / 1.16)}</td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Gestoría trámites vehiculares</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Servicio y/o mantenimiento</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">Otros</td>
-                  <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">$0.00</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc;"><strong>Subtotal</strong></td>
-                  <td style="padding: 5px 8px; border-bottom: 2px solid #ccc; text-align: right; white-space: nowrap;"><strong>${formatoMoneda(res.rentaMensualSubtotal)}</strong></td>
-                </tr>
-                <tr style="background:#f9f9f9;">
-                  <td style="padding: 5px 8px;">IVA</td>
-                  <td style="padding: 5px 8px; text-align: right; white-space: nowrap;">${formatoMoneda(res.rentaMensualIVA)}</td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="background-color: #2c2c2c; color: white; padding: 6px 10px; font-weight: 700;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <tr>
-                        <td style="font-size: 10.5px;">PAGO TOTAL RENTA MENSUAL</td>
-                        <td style="text-align: right; white-space: nowrap;">${formatoMoneda(res.rentaMensualTotal)} MXN</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- VALOR RESIDUAL -->
-              <div style="margin-top: 8px; background-color: transparent; color: black; padding: 8px 10px; font-weight: 700; font-size: 10.5px; text-align: right;">
-                VALOR RESIDUAL ESTIMADO<br/>
-                <span style="font-weight: 400;">${formatoMoneda(res.residualReal)}</span>
-              </div>
-            </td>
-
-          </tr>
-        </table>
-      </div>
-
-      <!-- OBSERVACIONES Y NOTAS -->
-      <div style="padding: 0px 24px 8px 24px; background: white; font-size: 9.5px; color: #333; line-height: 1.5;">
-        <p style="font-weight: 700; margin: 6px 0 3px 0;">OBSERVACIONES</p>
-        <ul style="margin: 0; padding-left: 14px;">
-          <li> Sujeto a aprobación de crédito.</li>
-          <li> Cotización sujeta a cambios sin previo aviso.</li>
-          <li> Seguro y GPS obligatorio a cargo del cliente con renovaciones anuales (en caso de aplicar) cobertura amplia.</li>
-          <li> El valor de la tenencia y/o impuestos gubernamentales es estimado, sujeto a la fórmula gubernamental vigente y a la fecha de entrega de la unidad.</li>
-          <li> Sujeto a disponibilidad del activo en sus variantes y/o colores, así como su valor.</li>
-        </ul>
-        <p style="font-weight: 700; margin: 8px 0 3px 0;">NOTAS</p>
-        <ul style="margin: 0; padding-left: 14px;">
-          <li> Oferta preliminar sujeta a modificación según evaluación crediticia. Las condiciones definitivas se establecerán después de concluir satisfactoriamente el proceso de precalificación.</li>
-          <li> Al pago inicial se le suma el pago del seguro anual una vez que se confirme el precio de este o en caso de ser financiado, la parte que corresponda.</li>
-          <li> 1er renta deberá ser pagada antes o a la entrega del bien arrendado.</li>
-          <li> El Arrendatario pagará las rentas proporcionales que se generen entre el día de entrega del vehículo y la fecha de inicio del arrendamiento.</li>
-          <li> El pago mensual es domiciliado el día 1 de cada mes.</li>
-          <li> La arrendadora se reserva el derecho de adquirir los activos objeto del arrendamiento con el proveedor, distribuidor o canal comercial que más convenga a sus intereses, condiciones operativas y financieras.</li>
-        </ul>
-      </div>
-
-      <!-- FIRMA / CIERRE -->
-      <div style="padding: 6px 24px 14px 24px; background: white; font-size: 9.5px; color: #333; line-height: 1.6;">
-        <p style="font-weight: 700; color: #ea5533; margin: 0 0 4px 0; text-align: center; font-size: 10px;">
-          ¡Estamos encantados de resolver cualquier duda o comentario que tengas!
-        </p>
-        <p style="margin: 0;">
-          He leído y entiendo plenamente las condiciones y disposiciones contenidas en la presente cotización, estoy de acuerdo.
-        </p>
-        <p style="margin: 5px 0 0 0;">
-          <strong>${formData.nombre_cliente || 'A quien corresponda'}</strong>.&nbsp;&nbsp;
-          Metepec, Edo. de México, a ${fechaHoy}
-        </p>
-        <p style="margin: 6px 0 0 0; font-size: 9px; color: #555;">
-          Estimado cliente, te invitamos a leer nuestro
-          <span style="color: #ea5533;">Aviso de privacidad y transferencia de datos personales</span>;
-          y <span style="color: #ea5533;">Términos y condiciones generales del arrendamiento puro</span>.
-        </p>
-      </div>
-
-      <!-- FRANJA INFERIOR GRIS -->
-      <div style="margin-top: auto; background-color: #2c2c2c; box-sizing: border-box; padding: 2px 24px; display: flex; align-items: center; justify-content: center;">
-        <img
-          src="${logoUrl}"
-          alt="Flising"
-          style="height: 70px; object-fit: contain;"
-          onerror="this.style.display='none'"
-        />
-        <span style="color: #aaa; font-size: 10px; margin-left: 16px;">www.flising.com</span>
-      </div>
-
-    </div>
-  `;
-
-    const nombreArchivo = formData.nombre_cliente
-      ? `Cotizacion_${formData.nombre_cliente.replace(/\s+/g, '_')}.pdf`
-      : 'Cotizacion_Flising.pdf';
-
     try {
-      const montado = montarContenedorPdf(htmlContent);
-      wrapper = montado.wrapper;
-      const { root } = montado;
-
-      await esperarRecursosPdf(root);
-      await new Promise((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(resolve));
-      });
-
-      const altoPx = Math.ceil(root.scrollHeight);
-      root.style.width = `${PDF_ANCHO_PX}px`;
-      root.style.height = `${altoPx}px`;
-
-      const opciones = {
-        margin: 0,
-        filename: nombreArchivo,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: PDF_ESCALA_CANVAS,
-          useCORS: true,
-          allowTaint: false,
-          width: PDF_ANCHO_PX,
-          height: altoPx,
-          windowWidth: PDF_ANCHO_PX,
-          windowHeight: altoPx,
-          scrollX: 0,
-          scrollY: 0,
-        },
-        pagebreak: { mode: ['css', 'legacy'] },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      };
-
-      await html2pdf().set(opciones).from(root).save();
+      await descargarPdfPreview(formData);
     } catch (error) {
       console.error('Error al generar PDF:', error);
-      alert('No se pudo generar el PDF. Intenta de nuevo.');
+      alert(error.message || 'No se pudo generar el PDF. Intenta de nuevo.');
     } finally {
-      wrapper?.remove();
       setGenerandoPdf(false);
+    }
+  };
+
+  const handleGenerarPdfDetalle = async () => {
+    if (!detalleCotizacion || generandoPdfDetalle) return;
+    setGenerandoPdfDetalle(true);
+    try {
+      await generarPdfDesdeCotizacion(detalleCotizacion, detalleCotizacion.lead_nombre);
+    } catch (error) {
+      console.error('Error al generar PDF:', error);
+      alert(error.message || 'No se pudo generar el PDF. Intenta de nuevo.');
+    } finally {
+      setGenerandoPdfDetalle(false);
     }
   };
 
@@ -1335,7 +1023,7 @@ setErrores(err);
               {guardando ? 'Guardando...' : '💾 Guardar DB'}
             </button>
             <button 
-              onClick={imprimirPDF} 
+              onClick={solicitarPdfVivo}
               disabled={!puedeGuardarOPdf || generandoPdf} 
               className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGuardarOPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
             >
@@ -1511,7 +1199,47 @@ setErrores(err);
         cotizacionId={detalleCotizacion?.id}
         prospectoNombre={detalleCotizacion?.lead_nombre}
         agenteNombre={detalleCotizacion?.agente_nombre}
+        onGenerarPdf={handleGenerarPdfDetalle}
+        generandoPdf={generandoPdfDetalle}
       />
+
+      {avisoPdfVivoAbierto && (
+        <div
+          className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="aviso-pdf-vivo-titulo"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+            <h2
+              id="aviso-pdf-vivo-titulo"
+              className="text-slate-900 font-bold text-lg mb-3"
+            >
+              PDF sin folio
+            </h2>
+            <p className="text-slate-700 text-sm leading-relaxed">
+              Se generará un PDF <strong>sin folio</strong> y <strong>no se guardará</strong> en el historial.
+              Si deseas conservar la cotización con folio oficial, guarda primero desde el cotizador.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setAvisoPdfVivoAbierto(false)}
+                className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={ejecutarPdfVivo}
+                className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white transition-colors"
+              >
+                Generar PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmacionHistorialDestino && (
         <div

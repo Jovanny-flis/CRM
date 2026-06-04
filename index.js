@@ -32,6 +32,19 @@ const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizaci
 const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
 const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
 const reporteMaestro = require('./lib/reporteMaestro');
+const {
+    generarPdfDesdeFormulario,
+    generarPdfDesdeCotizacion,
+    cerrarNavegadorPdf,
+} = require('./lib/generar-pdf-cotizacion');
+
+const ROLES_COTIZADOR = ['super_admin', 'supervisor', 'admin_empresa', 'agente', 'agente_cotizador'];
+
+const enviarPdfCotizacion = (res, { buffer, nombreArchivo }) => {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo}"`);
+    res.send(buffer);
+};
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -56,6 +69,7 @@ app.use(cors({
     origin: origenesPermitidos,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition'],
     credentials: true
 }));
 app.use(express.json());
@@ -1509,6 +1523,77 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     });
 });
 
+// PDF de cotización guardada (historial, leads, modal detalle)
+app.get(
+    '/api/cotizaciones/:id/pdf',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    async (req, res) => {
+        const { id } = req.params;
+        const db = pool.promise();
+
+        try {
+            const [filas] = await db.query(
+                `SELECT c.*, l.nombre AS lead_nombre
+                 FROM cotizaciones c
+                 LEFT JOIN leads l ON c.lead_id = l.id
+                 WHERE c.id = ?
+                 LIMIT 1`,
+                [id],
+            );
+
+            if (!filas.length) {
+                return res.status(404).json({ error: 'Cotización no encontrada.' });
+            }
+
+            const cot = filas[0];
+            const { rol, id: usuarioId } = req.usuarioCRM;
+            if ((rol === 'agente' || rol === 'agente_cotizador') && cot.usuario_id !== usuarioId) {
+                return res.status(403).json({ error: 'No tienes acceso a esta cotización.' });
+            }
+
+            const nombreProspecto = req.query.nombre_prospecto || cot.lead_nombre;
+            const pdf = await generarPdfDesdeCotizacion(cot, nombreProspecto);
+            enviarPdfCotizacion(res, pdf);
+        } catch (error) {
+            console.error('❌ Error generando PDF de cotización:', error.message);
+            res.status(error.status || 500).json({
+                error: error.message || 'Error al generar el PDF.',
+                detalle: error.detalle,
+            });
+        }
+    },
+);
+
+// PDF en vivo desde el cotizador (sin folio; no persiste)
+app.post(
+    '/api/cotizaciones/pdf',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    async (req, res) => {
+        try {
+            const { formData, nombre_prospecto: nombreProspecto } = req.body || {};
+            if (!formData || typeof formData !== 'object') {
+                return res.status(400).json({ error: 'Falta el formulario de la cotización (formData).' });
+            }
+
+            const pdf = await generarPdfDesdeFormulario({
+                formData,
+                folio: null,
+                nombreProspecto: nombreProspecto || formData.nombre_cliente,
+            });
+            enviarPdfCotizacion(res, pdf);
+        } catch (error) {
+            console.error('❌ Error generando PDF preview:', error.message);
+            res.status(error.status || 500).json({
+                error: error.message || 'Error al generar el PDF.',
+                detalle: error.detalle,
+            });
+        }
+    },
+);
+
 // Obtener una cotización por ID (réplica / detalle; después de rutas con segmento fijo)
 app.get('/api/cotizaciones/:id', (req, res) => {
     const { id } = req.params;
@@ -1593,6 +1678,15 @@ app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin',
 
 // 10. Encendemos el servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const servidor = app.listen(PORT, () => {
     console.log(`🚀 Servidor CRM corriendo en: http://localhost:${PORT}`);
 });
+
+const apagarServidor = async (signal) => {
+    console.log(`\n${signal} recibido. Cerrando servidor…`);
+    await cerrarNavegadorPdf();
+    servidor.close(() => process.exit(0));
+};
+
+process.on('SIGINT', () => { apagarServidor('SIGINT'); });
+process.on('SIGTERM', () => { apagarServidor('SIGTERM'); });
