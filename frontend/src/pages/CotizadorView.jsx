@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MoreVertical, Plus } from 'lucide-react';
+import { MoreVertical, Plus, Search } from 'lucide-react';
 import api from '../api';
 import html2pdf from 'html2pdf.js';
 import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
@@ -47,6 +48,31 @@ const cotizacionListaParaAccion = (data, erroresCalculo) => {
   const valor = parseFloat(String(data.valorActivo || '').replace(/,/g, ''));
   if (!valor || valor <= 0) return false;
   return camposActivoCompletos(data);
+};
+
+const normalizarBusquedaHistorial = (texto) =>
+  String(texto || '').trim().toLowerCase();
+
+/** Variantes de folio para búsqueda parcial (FL-042, 042, 42, etc.) */
+const variantesFolioHistorial = (folio) => {
+  if (folio == null || folio === '') return '';
+  const num = String(folio);
+  const padded = num.padStart(3, '0');
+  return `fl-${padded} ${padded} ${num}`.toLowerCase();
+};
+
+const cotizacionCoincideBusquedaHistorial = (cot, termino) => {
+  const q = normalizarBusquedaHistorial(termino);
+  if (!q) return true;
+
+  const nombre = normalizarBusquedaHistorial(cot.lead_nombre);
+  if (nombre && nombre.includes(q)) return true;
+
+  const folioTxt = variantesFolioHistorial(cot.folio);
+  if (!folioTxt) return false;
+
+  const qFolio = q.replace(/^fl-?/, '');
+  return folioTxt.includes(q) || (qFolio !== '' && folioTxt.includes(qFolio));
 };
 
 const esperarRecursosPdf = (elemento) => {
@@ -136,6 +162,10 @@ const CotizadorView = () => {
   const [modalDestino, setModalDestino] = useState(null);
   const [referenciaNombreClave, setReferenciaNombreClave] = useState('');
   const [menuHistorialId, setMenuHistorialId] = useState(null);
+  const [busquedaHistorial, setBusquedaHistorial] = useState('');
+  const [menuHistorialPanelStyle, setMenuHistorialPanelStyle] = useState(null);
+  const menuHistorialTriggerRef = useRef(null);
+  const menuHistorialPanelRef = useRef(null);
   const [gpsCatalogo, setGpsCatalogo] = useState([]);
   const [panelGpsAbierto, setPanelGpsAbierto] = useState(false);
 
@@ -145,6 +175,35 @@ const CotizadorView = () => {
   const puedeGuardarOPdf = cotizacionListaParaAccion(formData, errores);
 
   const leadsNombreUnico = useMemo(() => leadsPorNombreUnico(leads), [leads]);
+
+  const historialFiltrado = useMemo(
+    () => historial.filter((cot) => cotizacionCoincideBusquedaHistorial(cot, busquedaHistorial)),
+    [historial, busquedaHistorial],
+  );
+
+  const cotizacionMenuHistorialAbierta = useMemo(
+    () => historial.find((cot) => cot.id === menuHistorialId) ?? null,
+    [historial, menuHistorialId],
+  );
+
+  const calcularPosicionMenuHistorial = () => {
+    if (!menuHistorialTriggerRef.current) return;
+
+    const rect = menuHistorialTriggerRef.current.getBoundingClientRect();
+    const anchoPanel = 208;
+    const espacioAbajo = window.innerHeight - rect.bottom - 8;
+    const espacioArriba = rect.top - 8;
+    const abrirArriba = espacioAbajo < 120 && espacioArriba > espacioAbajo;
+    const top = abrirArriba ? Math.max(8, rect.top - 8 - 120) : rect.bottom + 4;
+
+    setMenuHistorialPanelStyle({
+      position: 'fixed',
+      top,
+      right: Math.max(8, window.innerWidth - rect.right),
+      width: anchoPanel,
+      zIndex: 9999,
+    });
+  };
 
   const cargarHistorial = () => {
     api.get(`/cotizaciones/empresa/${empresaId}?usuario_id=${usuarioLogueado.id}&rol=${usuarioLogueado.rol}`)
@@ -200,13 +259,29 @@ const CotizadorView = () => {
   }, [location.state?.replicarCotizacionId, empresaId, navigate]);
 
   useEffect(() => {
-    if (!menuHistorialId) return undefined;
+    if (!menuHistorialId) {
+      setMenuHistorialPanelStyle(null);
+      return undefined;
+    }
+
+    calcularPosicionMenuHistorial();
+
+    const handleScrollOrResize = () => calcularPosicionMenuHistorial();
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+
     const cerrarMenu = (e) => {
       if (e.target.closest('[data-menu-historial-cot]')) return;
+      if (menuHistorialPanelRef.current?.contains(e.target)) return;
       setMenuHistorialId(null);
     };
     document.addEventListener('click', cerrarMenu);
-    return () => document.removeEventListener('click', cerrarMenu);
+
+    return () => {
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+      document.removeEventListener('click', cerrarMenu);
+    };
   }, [menuHistorialId]);
 
   const aplicarReplicacion = (cot) => {
@@ -1250,6 +1325,17 @@ setErrores(err);
         <h2 className="text-xl font-bold text-slate-800 mb-6 border-b border-slate-100 pb-4">
           Historial de Cotizaciones Guardadas
         </h2>
+        <div className="relative mb-6 max-w-md">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input
+            type="search"
+            value={busquedaHistorial}
+            onChange={(e) => setBusquedaHistorial(e.target.value)}
+            placeholder="Buscar por prospecto o folio (ej. FL-042, 42)…"
+            className="w-full bg-white border-2 border-slate-300 rounded-xl pl-11 pr-4 py-3 focus:border-[#ea5533] outline-none transition-colors font-medium text-slate-700 shadow-inner"
+            aria-label="Buscar en historial de cotizaciones"
+          />
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -1270,7 +1356,7 @@ setErrores(err);
               </tr>
             </thead>
             <tbody>
-              {historial.map(cot => (
+              {historialFiltrado.map(cot => (
   <tr key={cot.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
     
     <td className="p-4 text-sm font-black text-slate-800">
@@ -1311,6 +1397,7 @@ setErrores(err);
     <td className="p-4 text-sm">
       <div className="relative inline-block" data-menu-historial-cot>
         <button
+          ref={menuHistorialId === cot.id ? menuHistorialTriggerRef : undefined}
           type="button"
           onClick={(e) => {
             e.stopPropagation();
@@ -1318,53 +1405,10 @@ setErrores(err);
           }}
           className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
           aria-label="Acciones de cotización"
+          aria-expanded={menuHistorialId === cot.id}
         >
           <MoreVertical size={18} />
         </button>
-        {menuHistorialId === cot.id && (
-          <div className="absolute right-0 z-20 mt-1 w-52 bg-white rounded-xl shadow-lg border border-slate-100 py-1">
-            <button
-              type="button"
-              onClick={() => {
-                setMenuHistorialId(null);
-                aplicarReplicacion(cot);
-              }}
-              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              Replicar cotización
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMenuHistorialId(null);
-                setModalDestino({
-                  modo: 'historial',
-                  cotizacion: cot,
-                  nombreInicial: cot.lead_nombre || '',
-                  pasoInicial: 'elegir',
-                });
-              }}
-              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              Nuevo lead
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMenuHistorialId(null);
-                setModalDestino({
-                  modo: 'historial',
-                  cotizacion: cot,
-                  nombreInicial: cot.lead_nombre || '',
-                  pasoInicial: 'existente',
-                });
-              }}
-              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              Vincular a lead existente
-            </button>
-          </div>
-        )}
       </div>
     </td>
   </tr>
@@ -1376,10 +1420,68 @@ setErrores(err);
     </td>
   </tr>
 )}
+{historial.length > 0 && historialFiltrado.length === 0 && (
+  <tr>
+    <td colSpan={usuarioLogueado.rol !== 'agente' ? "8" : "7"} className="p-8 text-center text-slate-400 font-medium">
+      No hay cotizaciones que coincidan con tu búsqueda.
+    </td>
+  </tr>
+)}
             </tbody>
           </table>
         </div>
       </div>
+
+      {cotizacionMenuHistorialAbierta && menuHistorialPanelStyle && createPortal(
+        <div
+          ref={menuHistorialPanelRef}
+          style={menuHistorialPanelStyle}
+          className="bg-white rounded-xl shadow-lg border border-slate-100 py-1"
+          data-menu-historial-cot-panel
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setMenuHistorialId(null);
+              aplicarReplicacion(cotizacionMenuHistorialAbierta);
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Replicar cotización
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuHistorialId(null);
+              setModalDestino({
+                modo: 'historial',
+                cotizacion: cotizacionMenuHistorialAbierta,
+                nombreInicial: cotizacionMenuHistorialAbierta.lead_nombre || '',
+                pasoInicial: 'elegir',
+              });
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Nuevo lead
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuHistorialId(null);
+              setModalDestino({
+                modo: 'historial',
+                cotizacion: cotizacionMenuHistorialAbierta,
+                nombreInicial: cotizacionMenuHistorialAbierta.lead_nombre || '',
+                pasoInicial: 'existente',
+              });
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Vincular a lead existente
+          </button>
+        </div>,
+        document.body,
+      )}
 
       <ModalDestinoProspecto
         abierto={Boolean(modalDestino)}
