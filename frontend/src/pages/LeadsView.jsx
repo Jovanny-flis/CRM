@@ -547,7 +547,7 @@ function LeadsView() {
     <div className="font-sans w-full max-w-full min-w-0 pb-20">
       <header className="mb-8 w-full max-w-full min-w-0 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 shrink">
-          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Tablero de Leads</h1>
+          <h1 className="text-3xl font-extrabold text-primary tracking-tight">Tablero de Leads</h1>
           <p className="text-slate-500 mt-1">Gestión de prospectos por equipo</p>
         </div>
         
@@ -558,13 +558,13 @@ function LeadsView() {
               <button 
                 type="button"
                 onClick={() => setMenuAgentesAbierto(!menuAgentesAbierto)}
-                className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm transition-all hover:bg-slate-50"
+                className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 shadow-sm transition-all hover:bg-slate-50"
               >
                 <span className="flex items-center gap-2">
                   {filtroAgente === "" ? (
-                    <Users size={18} className="text-blue-500" />
+                    <Users size={18} className="text-primary" />
                   ) : (
-                    <User size={18} className="text-blue-500" />
+                    <User size={18} className="text-primary" />
                   )}
                   {filtroAgente === "" 
                     ? "Todos los agentes" 
@@ -585,14 +585,14 @@ function LeadsView() {
                       setMenuAgentesAbierto(false);
                     }}
                     className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
-                      filtroAgente === "" ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+                      filtroAgente === "" ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <Users size={18} className={filtroAgente === "" ? 'text-blue-600' : 'text-slate-400'} />
+                      <Users size={18} className={filtroAgente === "" ? 'text-primary' : 'text-slate-400'} />
                       Todos los agentes
                     </div>
-                    {filtroAgente === "" && <Check size={16} className="text-blue-600" />}
+                    {filtroAgente === "" && <Check size={16} className="text-primary" />}
                   </button>
 
                   {agentes.map(agente => {
@@ -606,14 +606,14 @@ function LeadsView() {
                           setMenuAgentesAbierto(false);
                         }}
                         className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
-                          esSeleccionado ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+                          esSeleccionado ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <User size={18} className={esSeleccionado ? 'text-blue-600' : 'text-slate-400'} />
+                          <User size={18} className={esSeleccionado ? 'text-primary' : 'text-slate-400'} />
                           {agente.nombre}
                         </div>
-                        {esSeleccionado && <Check size={16} className="text-blue-600" />}
+                        {esSeleccionado && <Check size={16} className="text-primary" />}
                       </button>
                     );
                   })}
@@ -626,7 +626,7 @@ function LeadsView() {
             <button
               type="button"
               onClick={() => setMenuEstatusAbierto(!menuEstatusAbierto)}
-              className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm hover:bg-slate-50"
+              className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 shadow-sm hover:bg-slate-50 transition-all"
             >
               <span>{etiquetaFiltroEstatus()}</span>
               <ChevronDown size={16} className={`text-slate-400 transition-transform ${menuEstatusAbierto ? 'rotate-180' : ''}`} />
@@ -637,7 +637,7 @@ function LeadsView() {
                   type="button"
                   onClick={seleccionarVistaPredeterminada}
                   className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                    modoFiltroEstatus === 'predeterminado' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                    modoFiltroEstatus === 'predeterminado' ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Vista predeterminada
@@ -647,7 +647,7 @@ function LeadsView() {
                   type="button"
                   onClick={seleccionarTodosLosEstatus}
                   className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                    modoFiltroEstatus === 'todos' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                    modoFiltroEstatus === 'todos' ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Todos los estatus
@@ -661,7 +661,7 @@ function LeadsView() {
                       type="button"
                       onClick={() => toggleFiltroEstatus(est.id)}
                       className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                        sel ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                        sel ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50'
                       }`}
                     >
                       <span className="flex items-center gap-2">
@@ -682,7 +682,7 @@ function LeadsView() {
           <button 
             onClick={() => { setLeadEditando(null); setModoSoloLectura(false); setIsModalOpen(true); }}
             disabled={etapas.length === 0}
-            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 whitespace-nowrap ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
+            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 whitespace-nowrap ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-primary hover:brightness-95 text-white shadow-sm hover:shadow-md'}`}
           >
             <span className="text-xl">+</span> Nuevo Prospecto
           </button>
@@ -711,7 +711,7 @@ function LeadsView() {
               key={etapa.id} 
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, etapa.id)}
-              className="flex-shrink-0 w-80 bg-slate-200/40 rounded-2xl p-4 border border-slate-200/60 backdrop-blur-sm"
+              className="flex-shrink-0 w-80 bg-slate-50/80 rounded-2xl p-4 border border-slate-100"
             >
               <div className="mb-5 px-2">
                 <div className="flex justify-between items-center mb-2">
@@ -740,17 +740,17 @@ function LeadsView() {
                     onDragStart={movible ? (e) => handleDragStart(e, lead.id) : undefined}
                     onDragEnd={movible ? handleDragEnd : undefined}
                     style={estiloTarjetaLead(lead)}
-                    className={`p-4 rounded-xl shadow-sm border group relative overflow-hidden transition-shadow ${
+                    className={`p-4 rounded-xl shadow-sm border group relative overflow-hidden transition-all ${
                       movible
-                        ? 'hover:shadow-md cursor-grab active:cursor-grabbing'
+                        ? 'hover:shadow-md cursor-grab active:cursor-grabbing hover:border-primary/40'
                         : cancelado
                           ? 'opacity-75 grayscale cursor-default'
                           : 'opacity-90 cursor-default'
-                    } ${!lead.estatus_color && !cancelado ? 'bg-white border-slate-200 hover:border-blue-400' : ''}`}
+                    } ${!lead.estatus_color && !cancelado ? 'bg-white border-slate-200' : ''}`}
                   >
                     <div
                       className="absolute left-0 top-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity"
-                      style={{ backgroundColor: lead.estatus_color || (cancelado ? '#94a3b8' : (etapa.color_hex || '#3b82f6')) }}
+                      style={{ backgroundColor: lead.estatus_color || (cancelado ? '#94a3b8' : (etapa.color_hex || 'var(--empresa-color)')) }}
                     />
                     
                     {/* BOTONES DE ACCIÓN FLOTANTES: VER Y EDITAR */}
@@ -758,7 +758,7 @@ function LeadsView() {
                       <button 
                         type="button"
                         onClick={() => abrirModalVer(lead)}
-                        className="text-slate-400 hover:text-blue-500 bg-white/95 border border-slate-100 rounded-md p-1.5 shadow-sm transition-colors"
+                        className="text-slate-400 hover:text-primary bg-white/95 border border-slate-100 rounded-md p-1.5 shadow-sm transition-colors"
                         title="Ver Detalles"
                       >
                         <Eye size={14} />
@@ -817,7 +817,7 @@ function LeadsView() {
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-medium max-w-[120px]">
-                          <User size={12} className="text-blue-500 shrink-0" />
+                          <User size={12} className="text-slate-400 shrink-0" />
                           <span className="truncate" title={lead.agente_nombre || 'Desconocido'}>
                             {lead.agente_nombre ? lead.agente_nombre.split(' ')[0] : 'Desconocido'}
                           </span>
@@ -871,11 +871,11 @@ function LeadsView() {
       {/* MODAL DE CONFIRMACIÓN DE MOVIMIENTO */}
       {confirmacionMovimiento && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 border border-slate-100">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
               El lead #{confirmacionMovimiento.idCorto} se moverá de{' '}
-              <span className="text-blue-700">{confirmacionMovimiento.etapaOrigen}</span> a{' '}
-              <span className="text-blue-700">{confirmacionMovimiento.etapaDestino}</span>{' '}
+              <span className="text-primary">{confirmacionMovimiento.etapaOrigen}</span> a{' '}
+              <span className="text-primary">{confirmacionMovimiento.etapaDestino}</span>{' '}
               y generará una etiqueta temporal en la base de datos. ¿Desea continuar?
             </p>
             <div className="mt-6 flex gap-3">
@@ -889,7 +889,7 @@ function LeadsView() {
               <button
                 type="button"
                 onClick={confirmarMovimientoEtapa}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+                className="flex-1 px-4 py-3 bg-primary text-white font-bold rounded-xl hover:brightness-95 transition-colors shadow-sm"
               >
                 Continuar
               </button>
@@ -900,15 +900,15 @@ function LeadsView() {
 
       {/* MODAL PRINCIPAL: CREAR/EDITAR LEAD Y VER COTIZACIÓN */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-100 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
             <div className="p-8">
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
                   {modoSoloLectura && <Eye className="text-slate-400" size={24} />}
                   {leadEditando ? (modoSoloLectura ? 'Detalles del Prospecto' : 'Editar Prospecto') : 'Nuevo Prospecto'}
                 </h2>
-                <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-100 rounded-full p-2">
+                <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-100 hover:bg-slate-200 rounded-full p-2">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
               </div>
@@ -929,7 +929,7 @@ function LeadsView() {
                         value={formData.nombre} 
                         onChange={(e) => setFormData({...formData, nombre: e.target.value})} 
                         disabled={modoSoloLectura}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                         placeholder="Ej. Juan Pérez" 
                       />
                     </div>
@@ -940,7 +940,7 @@ function LeadsView() {
                         value={formData.tipo_persona}
                         onChange={(e) => setFormData({ ...formData, tipo_persona: e.target.value })}
                         disabled={modoSoloLectura}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800 transition-all"
                       >
                         {OPCIONES_TIPO_PERSONA.map((op) => (
                           <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
@@ -956,7 +956,7 @@ function LeadsView() {
                           value={formData.correo} 
                           onChange={(e) => setFormData({...formData, correo: e.target.value})} 
                           disabled={modoSoloLectura}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                           placeholder="juan@mail.com" 
                         />
                       </div>
@@ -967,7 +967,7 @@ function LeadsView() {
                           value={formData.telefono} 
                           onChange={(e) => setFormData({...formData, telefono: e.target.value})} 
                           disabled={modoSoloLectura}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                           placeholder="5512345678" 
                         />
                       </div>
@@ -983,7 +983,7 @@ function LeadsView() {
                           value={formData.valor} 
                           onChange={(e) => setFormData({...formData, valor: e.target.value})} 
                           disabled={modoSoloLectura || Boolean(leadEditando?.cotizacion_id)}
-                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura || leadEditando?.cotizacion_id ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
+                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold transition-all ${modoSoloLectura || leadEditando?.cotizacion_id ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
                           placeholder="Ej. 15000" 
                         />
                       </div>
@@ -1008,7 +1008,7 @@ function LeadsView() {
                             value={formData.estatus_id}
                             onChange={(e) => handleCambioEstatus(e.target.value)}
                             disabled={modoSoloLectura}
-                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none transition-all"
                           >
                             {estatusList.map((est) => (
                               <option key={est.id} value={est.id}>
@@ -1029,7 +1029,7 @@ function LeadsView() {
                               onChange={(e) => setMotivoDesactivacion(e.target.value)}
                               disabled={modoSoloLectura}
                               rows={3}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all"
                               placeholder="Describe el motivo..."
                             />
                           </div>
@@ -1044,7 +1044,7 @@ function LeadsView() {
                           value={formData.usuario_id} 
                           onChange={(e) => setFormData({...formData, usuario_id: e.target.value})} 
                           disabled={modoSoloLectura}
-                          className="w-full bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 focus:bg-white outline-none appearance-none font-medium text-blue-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 appearance-none font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all"
                         >
                           <option value="">Sin asignar</option>
                           {agentes.map(agente => (
@@ -1058,7 +1058,7 @@ function LeadsView() {
 
                     {!modoSoloLectura && (
                       <div className="pt-6 flex gap-4">
-                        <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all text-lg">
+                        <button type="submit" className="w-full py-4 bg-primary text-white font-bold rounded-xl hover:brightness-95 shadow-sm transition-all text-lg">
                           {leadEditando ? '💾 Guardar Cambios' : 'Crear Prospecto'}
                         </button>
                       </div>
@@ -1081,7 +1081,7 @@ function LeadsView() {
                           <button
                             type="button"
                             onClick={() => navigate('/cotizador', { state: { replicarCotizacionId: leadEditando.cotizacion_id } })}
-                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                            className="text-xs font-bold text-primary hover:brightness-75 underline"
                           >
                             Replicar cotización
                           </button>
@@ -1090,7 +1090,7 @@ function LeadsView() {
                           <button
                             type="button"
                             onClick={() => setMostrarBuscadorCotizacion(true)}
-                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                            className="text-xs font-bold text-primary hover:brightness-75 underline"
                           >
                             Cambiar Cotización
                           </button>
@@ -1149,7 +1149,7 @@ function LeadsView() {
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><Calendar size={14} /> Renta Mensual</div>
-                              <div className="font-bold text-lg text-blue-400">
+                              <div className="font-bold text-lg text-primary">
                                 {formatoMoneda(leadEditando.cotizacion_renta)}
                               </div>
                             </div>
@@ -1262,7 +1262,7 @@ function LeadsView() {
                                         </div>
                                       </div>
                                       <div className="text-right">
-                                        <div className="font-bold text-blue-600 text-sm">{formatoMoneda(cot.renta_mensual_con_iva)}</div>
+                                        <div className="font-bold text-primary text-sm">{formatoMoneda(cot.renta_mensual_con_iva)}</div>
                                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mt-0.5">Mensual</div>
                                       </div>
                                     </button>
@@ -1325,7 +1325,7 @@ function LeadsView() {
             <button
               type="button"
               onClick={confirmarAvisoCancelacion}
-              className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+              className="mt-6 w-full px-4 py-3 bg-primary text-white font-bold rounded-xl hover:brightness-95 transition-colors"
             >
               OK
             </button>

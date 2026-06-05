@@ -304,7 +304,7 @@ const CotizadorView = () => {
     setFormData((prev) => ({
       ...prev,
       lead_id: '',
-      nombre_cliente: leadSel ? leadSel.nombre : prev.nombre_cliente,
+      nombre_cliente: leadSel ? leadSel.nombre : prev.tipo_persona,
       tipo_persona: leadSel ? (leadSel.tipo_persona || '') : prev.tipo_persona,
     }));
   };
@@ -347,7 +347,7 @@ const CotizadorView = () => {
       } else if (destino.tipo === 'existente') {
         finalLeadId = destino.leadId;
       }
-        formData.usuario_id = usuarioLogueado.id;
+      formData.usuario_id = usuarioLogueado.id;
       const resCot = await api.post('/cotizaciones', formDataAPayloadCotizacion(formData, res, {
         empresaId,
         usuarioId: usuarioLogueado.id,
@@ -498,7 +498,12 @@ const CotizadorView = () => {
   const formatoMoneda = (monto) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
   
   const ToggleBtn = ({ flag, onClick, label }) => (
-    <button type="button" onClick={onClick} className={`px-3 py-2 text-xs font-bold rounded-md transition-colors ${flag ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>
+    <button 
+      type="button" 
+      onClick={onClick} 
+      // El toggle ahora usa el color primary
+      className={`px-3 py-2 text-xs font-bold rounded-md transition-all ${flag ? 'bg-primary text-white shadow-sm' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+    >
       {label}
     </button>
   );
@@ -510,8 +515,8 @@ const CotizadorView = () => {
     <div className="font-sans max-w-7xl mx-auto pb-20">
       <header className="mb-8 flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Cotizador de Arrendamiento</h1>
-          <p className="text-slate-500 mt-1">Flising.</p>
+          <h1 className="text-3xl font-extrabold text-primary tracking-tight">Cotizador de Arrendamiento</h1>
+          <p className="text-slate-500 mt-1">Simulación y guardado de cotizaciones.</p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
           {puedeUsarModoEspecial(usuarioLogueado) && (
@@ -530,7 +535,7 @@ const CotizadorView = () => {
           <button
             type="button"
             onClick={limpiarFormulario}
-            className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
+            className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-colors"
           >
             Limpiar Campos
           </button>
@@ -538,19 +543,19 @@ const CotizadorView = () => {
       </header>
 
       {modoCotizacionEspecial && (
-        <div className="mb-6 p-4 bg-[#ea5533]/80 text-white rounded-xl border-2 border-[#ea5533] text-sm font-medium">
+        <div className="mb-6 p-4 bg-[#ea5533]/80 text-white rounded-xl border-2 border-[#ea5533] text-sm font-medium shadow-sm">
           Modo cotización especial activo: los límites de parámetros no aplican. Al guardar como agente se solicitará autorización.
         </div>
       )}
 
       {folioOrigenReplicacion != null && (
-        <div className="mb-6 p-4 bg-amber-50 text-amber-900 rounded-xl border border-amber-200 text-sm font-medium">
+        <div className="mb-6 p-4 bg-amber-50 text-amber-900 rounded-xl border border-amber-200 text-sm font-medium shadow-sm">
           Parámetros copiados de FL-{String(folioOrigenReplicacion).padStart(3, '0')}. Al guardar se asignará un folio nuevo; la cotización original no se modifica.
         </div>
       )}
 
       {errores.general && (
-        <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 font-bold text-sm">
+        <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 font-bold text-sm shadow-sm">
           {errores.general}
         </div>
       )}
@@ -568,7 +573,7 @@ const CotizadorView = () => {
               <select 
                 value={referenciaNombreClave} 
                 onChange={handleLeadChange} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
               >
                 <option value="">-- Escribir nombre manualmente --</option>
                 {leadsNombreUnico.map((l) => {
@@ -591,7 +596,7 @@ const CotizadorView = () => {
                 type="text" 
                 value={formData.nombre_cliente} 
                 onChange={e => setFormData({...formData, nombre_cliente: e.target.value})} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 placeholder="Obligatorio para guardar" 
               />
             </div>
@@ -603,7 +608,7 @@ const CotizadorView = () => {
               <select
                 value={formData.tipo_persona}
                 onChange={e => setFormData({ ...formData, tipo_persona: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
               >
                 {OPCIONES_TIPO_PERSONA.map((op) => (
                   <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
@@ -638,7 +643,7 @@ const CotizadorView = () => {
                     }));
                   }
                 }} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
               >
                 <option value="Automotriz">Automotriz</option>
                 <option value="Otro">Otro</option>
@@ -654,7 +659,7 @@ const CotizadorView = () => {
                   <select 
                     value={formData.tipoVehiculo} 
                     onChange={e => setFormData({...formData, tipoVehiculo: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
                   >
                     <option value="Sedan">Sedan</option>
                     <option value="SUV">SUV</option>
@@ -672,7 +677,7 @@ const CotizadorView = () => {
                     type="text" 
                     value={formData.marca} 
                     onChange={e => setFormData({...formData, marca: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                     placeholder="Ej. Nissan"
                   />
                 </div>
@@ -685,7 +690,7 @@ const CotizadorView = () => {
                     type="text"
                     value={formData.modelo} 
                     onChange={e => setFormData({...formData, modelo: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                     placeholder="Ej. Versa"
                   />
                 </div>
@@ -698,7 +703,7 @@ const CotizadorView = () => {
                     type="text"
                     value={formData.version} 
                     onChange={e => setFormData({...formData, version: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                     placeholder="Ej. Sense"
                   />
                 </div>
@@ -711,7 +716,7 @@ const CotizadorView = () => {
                     type="text"
                     value={formData.anio} 
                     onChange={e => setFormData({...formData, anio: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                     placeholder="Ej. 2024"
                   />
                 </div>
@@ -725,14 +730,14 @@ const CotizadorView = () => {
                   type="text"
                   value={formData.nombreActivo} 
                   onChange={e => setFormData({...formData, nombreActivo: e.target.value})} 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                   placeholder="Ej. Maquinaria Industrial Modelo X"
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-bold text-blue-600 uppercase mb-2">
+              <label className="block text-xs font-bold text-primary uppercase mb-2">
                 Valor del Activo
               </label>
               <input 
@@ -740,7 +745,7 @@ const CotizadorView = () => {
                 inputMode="decimal"
                 value={formData.valorActivo} 
                 onChange={e => setFormData({...formData, valorActivo: formatMontoFormulario(e.target.value)})} 
-                className="w-full bg-blue-50 border border-blue-200 text-blue-800 font-bold rounded-xl px-4 py-3 outline-none focus:border-blue-500" 
+                className="w-full bg-primary/5 border border-primary/20 text-slate-800 font-bold rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 placeholder="Ej. 350,000" 
               />
             </div>
@@ -755,7 +760,7 @@ const CotizadorView = () => {
                 max="72" 
                 value={formData.plazo} 
                 onChange={e => setFormData({...formData, plazo: e.target.value})} 
-                className={`w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none ${errores.plazo ? 'border-red-500' : 'border-slate-200'}`} 
+                className={`w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.plazo ? 'border-red-500' : 'border-slate-200'}`} 
               />
             </div>
 
@@ -767,7 +772,7 @@ const CotizadorView = () => {
                 type="number" 
                 value={formData.tasaAnual} 
                 onChange={e => setFormData({...formData, tasaAnual: e.target.value})} 
-                className={`w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none ${errores.tasa ? 'border-red-500' : 'border-slate-200'}`} 
+                className={`w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.tasa ? 'border-red-500' : 'border-slate-200'}`} 
               />
             </div>
 
@@ -780,7 +785,7 @@ const CotizadorView = () => {
                   type="number" 
                   value={formData.pagoInicial} 
                   onChange={e => setFormData({...formData, pagoInicial: e.target.value})} 
-                  className={`flex-1 border rounded-xl px-4 py-2 outline-none ${errores.pagoInicial ? 'border-red-500' : 'border-slate-200'}`} 
+                  className={`flex-1 border bg-white rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.pagoInicial ? 'border-red-500' : 'border-slate-200'}`} 
                 />
                 <ToggleBtn flag={formData.isPagoInicialPct} onClick={() => setFormData({...formData, isPagoInicialPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isPagoInicialPct} onClick={() => setFormData({...formData, isPagoInicialPct: false})} label="$" />
@@ -797,7 +802,7 @@ const CotizadorView = () => {
                   type="number" 
                   value={formData.residual} 
                   onChange={e => setFormData({...formData, residual: e.target.value})} 
-                  className="flex-1 border border-slate-200 rounded-xl px-4 py-2 outline-none" 
+                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 />
                 <ToggleBtn flag={formData.isResidualPct} onClick={() => setFormData({...formData, isResidualPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isResidualPct} onClick={() => setFormData({...formData, isResidualPct: false})} label="$" />
@@ -814,48 +819,49 @@ const CotizadorView = () => {
                   type="number" 
                   value={formData.comision} 
                   onChange={e => setFormData({...formData, comision: e.target.value})} 
-                  className="flex-1 border border-slate-200 rounded-xl px-4 py-2 outline-none" 
+                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 />
                 <ToggleBtn flag={formData.isComisionPct} onClick={() => setFormData({...formData, isComisionPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isComisionPct} onClick={() => setFormData({...formData, isComisionPct: false})} label="$" />
               </div>
             </div>
-{/* --- NUEVO CAMPO: RENTAS EN DEPÓSITO --- */}
-        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
-            Rentas en Depósito (Garantía)
-          </label>
-          
-          <div className="flex items-center mb-2">
-            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={formData.isRentasDeposito}
-                onChange={e => setFormData({ ...formData, isRentasDeposito: e.target.checked, rentasDepositoCantidad: e.target.checked ? formData.rentasDepositoCantidad : '' })}
-                className="w-4 h-4 accent-blue-600 cursor-pointer"
-              />
-              ¿Solicitar rentas en depósito al inicio?
-            </label>
-          </div>
 
-          {/* Solo mostramos el input si el checkbox está marcado */}
-          {formData.isRentasDeposito && (
-            <div className="flex gap-2 mt-3 animate-fade-in">
-              <input
-                type="number"
-                min="1"
-                placeholder="Cantidad de rentas (ej. 1, 2)"
-                value={formData.rentasDepositoCantidad}
-                onChange={e => setFormData({ ...formData, rentasDepositoCantidad: e.target.value })}
-                className="flex-1 border border-slate-200 rounded-xl px-4 py-2 outline-none"
-              />
-              <div className="flex items-center px-3 bg-slate-200 text-slate-600 rounded-xl text-sm font-bold">
-                Meses
+            {/* --- NUEVO CAMPO: RENTAS EN DEPÓSITO --- */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                Rentas en Depósito (Garantía)
+              </label>
+              
+              <div className="flex items-center mb-2">
+                <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={formData.isRentasDeposito}
+                    onChange={e => setFormData({ ...formData, isRentasDeposito: e.target.checked, rentasDepositoCantidad: e.target.checked ? formData.rentasDepositoCantidad : '' })}
+                    className="w-4 h-4 accent-primary cursor-pointer"
+                  />
+                  ¿Solicitar rentas en depósito al inicio?
+                </label>
               </div>
+
+              {formData.isRentasDeposito && (
+                <div className="flex gap-2 mt-3 animate-fade-in">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Cantidad de rentas (ej. 1, 2)"
+                    value={formData.rentasDepositoCantidad}
+                    onChange={e => setFormData({ ...formData, rentasDepositoCantidad: e.target.value })}
+                    className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  />
+                  <div className="flex items-center px-3 bg-slate-200 text-slate-600 rounded-xl text-sm font-bold">
+                    Meses
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        {/* -------------------------------------- */}
+            {/* -------------------------------------- */}
+
             <div className={`p-4 rounded-xl border ${formData.tipoArrendamiento === 'Automotriz' ? 'bg-slate-50 border-slate-100' : 'bg-slate-100/80 border-slate-200'}`}>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                 Trámites e impuestos
@@ -868,13 +874,14 @@ const CotizadorView = () => {
                 inputMode="decimal"
                 value={formData.tipoArrendamiento === 'Automotriz' ? formData.servicios : ''} 
                 onChange={e => setFormData({...formData, servicios: formatMontoFormulario(e.target.value)})} 
-                className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400" 
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 disabled={formData.tipoArrendamiento !== 'Automotriz'} 
                 placeholder={formData.tipoArrendamiento !== 'Automotriz' ? 'No aplica' : ''}
               />
             </div>
 
-            <div className="md:col-span-2 bg-blue-50/50 p-4 rounded-xl border border-blue-100 grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Recuadro de Seguro y GPS con color tenue del primario */}
+            <div className="md:col-span-2 bg-primary/5 p-4 rounded-xl border border-primary/20 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                   Seguro
@@ -884,7 +891,7 @@ const CotizadorView = () => {
                   inputMode="decimal"
                   value={formData.seguro} 
                   onChange={e => setFormData({...formData, seguro: formatMontoFormulario(e.target.value)})} 
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2" 
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none mb-2 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 />
                 <div className="flex gap-2 mb-2">
                   <ToggleBtn flag={formData.isSeguroContado} onClick={() => setFormData({...formData, isSeguroContado: true})} label="Contado" />
@@ -908,9 +915,8 @@ const CotizadorView = () => {
                     <button
                       type="button"
                       onClick={() => setPanelGpsAbierto(true)}
-                      className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-slate-200 bg-slate-50 text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors"
+                      className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-colors"
                       title="Administrar catálogo GPS"
-                      aria-label="Administrar catálogo GPS"
                     >
                       <Plus size={14} />
                     </button>
@@ -922,7 +928,7 @@ const CotizadorView = () => {
                     inputMode="decimal"
                     value={formData.tipoArrendamiento === 'Automotriz' ? formData.gps : ''}
                     onChange={(e) => setFormData({ ...formData, gps: formatMontoFormulario(e.target.value) })}
-                    className={`flex-1 min-w-0 border border-slate-200 px-4 py-2 outline-none disabled:bg-slate-100 disabled:text-slate-400 ${
+                    className={`flex-1 bg-white min-w-0 border border-slate-200 px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 ${
                       muestraCatalogoGps ? 'rounded-l-xl rounded-r-none' : 'rounded-xl'
                     }`}
                     disabled={formData.tipoArrendamiento !== 'Automotriz'}
@@ -968,15 +974,14 @@ const CotizadorView = () => {
               <div className="flex justify-between text-sm"><span>GPS:</span><span>{formatoMoneda(res.gpsSub)}</span></div>
               <div className="flex justify-between text-sm text-slate-300"><span>Seguro:</span><span>{formatoMoneda(res.seguroSub)}</span></div>
               <div className="flex justify-between text-sm"><span>Trámites:</span><span>{formatoMoneda(res.serviciosSub)}</span></div>
-              {/* NUEVO DESGLOSE: Rentas en depósito */}
-{formData.isRentasDeposito && (
-  <div className="flex justify-between mb-2"> {/* OJO: Usa el mismo className que tenga la línea de arriba de "Trámites" para que los colores coincidan */}
-    <span className="text-gray-400">
-      Rentas dep. ({formData.rentasDepositoCantidad}):
-    </span>
-    <span>{formatoMoneda(res.rentasDepositoSubtotal || 0)}</span>
-  </div>
-)}
+              
+              {formData.isRentasDeposito && (
+                <div className="flex justify-between text-sm text-slate-300">
+                  <span>Rentas dep. ({formData.rentasDepositoCantidad}):</span>
+                  <span>{formatoMoneda(res.rentasDepositoSubtotal || 0)}</span>
+                </div>
+              )}
+              
               <div className="flex justify-between font-bold pt-2 border-t border-slate-700"><span>Subtotal:</span><span>{formatoMoneda(res.pagoInicialSubtotal)}</span></div>
               <div className="flex justify-between text-sm text-slate-400"><span>IVA:</span><span>{formatoMoneda(res.pagoInicialIVA)}</span></div>
             </div>
@@ -999,7 +1004,7 @@ const CotizadorView = () => {
             </div>
             <div className="bg-slate-900 p-4 rounded-xl flex justify-between items-center border border-slate-800">
               <span className="font-bold">Renta Mensual:</span>
-              <span className="font-black text-2xl text-blue-400">{formatoMoneda(res.rentaMensualTotal)}</span>
+              <span className="font-black text-2xl" style={{ color: 'var(--empresa-color)' }}>{formatoMoneda(res.rentaMensualTotal)}</span>
             </div>
           </div>
 
@@ -1018,14 +1023,14 @@ const CotizadorView = () => {
             <button 
               onClick={handleGuardarCotizacion} 
               disabled={guardando || !puedeGuardar}
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || !puedeGuardar ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || !puedeGuardar ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-primary hover:brightness-95 text-white shadow-sm'}`}
             >
               {guardando ? 'Guardando...' : '💾 Guardar DB'}
             </button>
             <button 
               onClick={solicitarPdfVivo}
               disabled={!puedeGenerarPdf || generandoPdf}
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGenerarPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGenerarPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:brightness-95 text-white shadow-sm'}`}
               title={modoCotizacionEspecial ? 'PDF no disponible en cotización especial hasta autorizar' : undefined}
             >
               {generandoPdf ? 'Generando PDF…' : '📄 Generar PDF'}
@@ -1035,7 +1040,7 @@ const CotizadorView = () => {
       </div>
 
       {/* ========================================================= */}
-      {/* HISTORIAL DE COTIZACIONES CON BOTÓN DE CONVERSIÓN Y AGENTE*/}
+      {/* HISTORIAL DE COTIZACIONES CON DISEÑO MINIMALISTA (TABLA)*/}
       {/* ========================================================= */}
       <div className="mt-12 bg-white rounded-3xl p-8 shadow-sm border border-slate-200">
         <h2 className="text-xl font-bold text-slate-800 mb-6 border-b border-slate-100 pb-4">
@@ -1048,141 +1053,152 @@ const CotizadorView = () => {
             value={busquedaHistorial}
             onChange={(e) => setBusquedaHistorial(e.target.value)}
             placeholder="Buscar por prospecto o folio (ej. FL-042, 42)…"
-            className="w-full bg-white border-2 border-slate-300 rounded-xl pl-11 pr-4 py-3 focus:border-[#ea5533] outline-none transition-colors font-medium text-slate-700 shadow-inner"
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 focus:bg-white focus:border-primary/50 focus:ring-2 focus:ring-primary/10 outline-none transition-all font-medium text-slate-700 shadow-inner"
             aria-label="Buscar en historial de cotizaciones"
           />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-separate border-spacing-0">
-            <thead>
-              <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                <th className="p-4 rounded-tl-xl">Folio</th>
-                <th className="p-4 rounded-tl-xl">Fecha</th>
-                <th className="p-4">Prospecto</th>
-                
+        
+        {/* Tabla Responsiva */}
+        <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+          <table className="w-full min-w-max text-left border-separate border-spacing-0">
+            <thead className="bg-slate-50/80 text-slate-500 text-[10px] uppercase tracking-wider font-bold">
+              <tr>
+                <th className="p-4 rounded-tl-xl whitespace-nowrap">Folio</th>
+                <th className="p-4 whitespace-nowrap">Fecha</th>
+                <th className="p-4 whitespace-nowrap">Prospecto</th>
                 {usuarioLogueado.rol !== 'agente' && (
-                  <th className="p-4 text-blue-600">Agente Creador</th>
+                  <th className="p-4 whitespace-nowrap">Agente Creador</th>
                 )}
-
-                {/* ENCABEZADO ACTUALIZADO */}
-                <th className="p-4">Vehículo / Activo</th>
-                <th className="p-4">Valor</th>
-                <th className="p-4">Renta Mensual</th>
-                <th className="p-4 rounded-tr-xl">Acción</th>
+                <th className="p-4 whitespace-nowrap">Vehículo / Activo</th>
+                <th className="p-4 whitespace-nowrap">Valor</th>
+                <th className="p-4 whitespace-nowrap">Renta Mensual</th>
+                <th className="p-4 rounded-tr-xl whitespace-nowrap text-center">Acción</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {historialFiltrado.map(cot => (
-  <tr
-    key={cot.id}
-    className={`transition-colors ${
-      esCotizacionEspecial(cot)
-        ? claseFilaHistorialEspecial()
-        : 'border-b border-slate-100 hover:bg-slate-50'
-    }`}
-  >
-    
-    <td className="p-4 text-sm font-black text-slate-800">
-      {cot.folio ? `FL-${String(cot.folio).padStart(3, '0')}` : '---'}
-    </td>
+                <tr
+                  key={cot.id}
+                  className={`transition-colors group hover:bg-slate-50/80 ${
+                    esCotizacionEspecial(cot) ? claseFilaHistorialEspecial() : ''
+                  }`}
+                >
+                  <td className="p-4 text-xs font-mono font-bold text-slate-800 whitespace-nowrap">
+                    {cot.folio ? (
+                      <span className="text-primary bg-primary/5 border border-primary/10 px-2 py-1.5 rounded-md shadow-sm">
+                        FL-{String(cot.folio).padStart(3, '0')}
+                      </span>
+                    ) : '---'}
+                  </td>
 
-    <td className="p-4 text-sm font-medium text-slate-700">
-      {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
-    </td>
+                  <td className="p-4 text-xs text-slate-500 whitespace-nowrap">
+                    {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
+                  </td>
 
-    <td className="p-4 text-sm font-bold text-slate-900">
-      {cot.lead_nombre ? (
-        <span className="text-blue-600 flex items-center gap-1">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
-          {cot.lead_nombre}
-        </span>
-      ) : (
-        <span className="text-slate-400 font-normal italic">Sin prospecto</span>
-      )}
-    </td>
+                  <td className="p-4 min-w-[180px] whitespace-nowrap">
+                    {cot.lead_nombre ? (
+                      <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <svg className="w-4 h-4 text-primary shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                        <span className="truncate max-w-[200px]" title={cot.lead_nombre}>{cot.lead_nombre}</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-xs italic">Sin prospecto</span>
+                    )}
+                  </td>
 
-    {usuarioLogueado.rol !== 'agente' && (
-      <td className="p-4 text-sm font-medium text-slate-500 bg-blue-50/30">
-        {cot.agente_nombre || 'Desconocido'}
-      </td>
-    )}
+                  {usuarioLogueado.rol !== 'agente' && (
+                    <td className="p-4 text-sm font-medium text-slate-600 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/20 shrink-0">
+                          {(cot.agente_nombre || 'U')[0].toUpperCase()}
+                        </div>
+                        {cot.agente_nombre || 'Desconocido'}
+                      </div>
+                    </td>
+                  )}
 
-    {/* AQUÍ COMBINAMOS EL NOMBRE DEL ACTIVO Y EL TIPO DE ACTIVO */}
-    <td className="p-4">
-      <div className="text-sm font-bold text-slate-800">{cot.nombre_activo || '-'}</div>
-      <div className="text-xs text-slate-500 font-medium">{cot.tipo_activo}</div>
-    </td>
+                  <td className="p-4 min-w-[180px] max-w-[250px] whitespace-nowrap overflow-hidden text-ellipsis" title={cot.nombre_activo}>
+                    <div className="text-xs font-bold text-slate-800 truncate">{cot.nombre_activo || '-'}</div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">{cot.tipo_activo}</div>
+                  </td>
 
-    <td className="p-4 text-sm font-bold text-blue-600">{formatoMoneda(cot.valor_activo)}</td>
+                  <td className="p-4 text-sm font-bold text-primary whitespace-nowrap">
+                    {formatoMoneda(cot.valor_activo)}
+                  </td>
 
-    <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
+                  <td className="p-4 text-sm font-black text-slate-800 whitespace-nowrap">
+                    {formatoMoneda(cot.renta_mensual_con_iva)}
+                  </td>
 
-    <td className="p-4 text-sm">
-      {cotizacionPendienteAutorizacion(cot) && puedeAutorizarEspecial(usuarioLogueado) && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          <button
-            type="button"
-            disabled={procesandoAutorizacion}
-            onClick={() => ejecutarAutorizacionEspecial(cot.id, false)}
-            className="px-2 py-1 text-xs font-bold rounded-lg bg-green-600 text-white hover:bg-green-500"
-          >
-            Aceptar
-          </button>
-          <button
-            type="button"
-            disabled={procesandoAutorizacion}
-            onClick={() => ejecutarAutorizacionEspecial(cot.id, true)}
-            className="px-2 py-1 text-xs font-bold rounded-lg bg-red-600 text-white hover:bg-red-500"
-          >
-            Rechazar
-          </button>
-        </div>
-      )}
-      {cotizacionPendienteAutorizacion(cot) && !puedeAutorizarEspecial(usuarioLogueado) && (
-        <span className="block text-[10px] font-bold text-amber-800 mb-1 uppercase">Pendiente autorización</span>
-      )}
-      <div className="relative inline-block" data-menu-historial-cot>
-        <button
-          ref={menuHistorialId === cot.id ? menuHistorialTriggerRef : undefined}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuHistorialId(menuHistorialId === cot.id ? null : cot.id);
-          }}
-          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-          aria-label="Acciones de cotización"
-          aria-expanded={menuHistorialId === cot.id}
-        >
-          <MoreVertical size={18} />
-        </button>
-      </div>
-    </td>
-  </tr>
-))}
-{historial.length === 0 && (
-  <tr>
-    <td colSpan={usuarioLogueado.rol !== 'agente' ? "8" : "7"} className="p-8 text-center text-slate-400 font-medium">
-      Aún no hay cotizaciones guardadas en el sistema.
-    </td>
-  </tr>
-)}
-{historial.length > 0 && historialFiltrado.length === 0 && (
-  <tr>
-    <td colSpan={usuarioLogueado.rol !== 'agente' ? "8" : "7"} className="p-8 text-center text-slate-400 font-medium">
-      No hay cotizaciones que coincidan con tu búsqueda.
-    </td>
-  </tr>
-)}
+                  <td className="p-4 text-center whitespace-nowrap">
+                    {cotizacionPendienteAutorizacion(cot) && puedeAutorizarEspecial(usuarioLogueado) && (
+                      <div className="flex flex-wrap gap-1 mb-2 justify-center">
+                        <button
+                          type="button"
+                          disabled={procesandoAutorizacion}
+                          onClick={() => ejecutarAutorizacionEspecial(cot.id, false)}
+                          className="px-2 py-1 text-xs font-bold rounded-md bg-green-600 text-white hover:bg-green-500 shadow-sm"
+                        >
+                          Aceptar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={procesandoAutorizacion}
+                          onClick={() => ejecutarAutorizacionEspecial(cot.id, true)}
+                          className="px-2 py-1 text-xs font-bold rounded-md bg-red-600 text-white hover:bg-red-500 shadow-sm"
+                        >
+                          Rechazar
+                        </button>
+                      </div>
+                    )}
+                    {cotizacionPendienteAutorizacion(cot) && !puedeAutorizarEspecial(usuarioLogueado) && (
+                      <span className="block text-[9px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md mb-1 uppercase tracking-wider mx-auto w-max">Pendiente auth</span>
+                    )}
+                    
+                    <div className="relative inline-block" data-menu-historial-cot>
+                      <button
+                        ref={menuHistorialId === cot.id ? menuHistorialTriggerRef : undefined}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuHistorialId(menuHistorialId === cot.id ? null : cot.id);
+                        }}
+                        className="p-1.5 rounded-md text-slate-400 hover:bg-primary/10 hover:text-primary transition-colors"
+                        aria-label="Acciones de cotización"
+                        aria-expanded={menuHistorialId === cot.id}
+                      >
+                        <MoreVertical size={18} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              
+              {historial.length === 0 && (
+                <tr>
+                  <td colSpan={usuarioLogueado.rol !== 'agente' ? "8" : "7"} className="p-12 text-center text-slate-400 font-medium bg-slate-50/50">
+                    Aún no hay cotizaciones guardadas en el sistema.
+                  </td>
+                </tr>
+              )}
+              {historial.length > 0 && historialFiltrado.length === 0 && (
+                <tr>
+                  <td colSpan={usuarioLogueado.rol !== 'agente' ? "8" : "7"} className="p-12 text-center text-slate-400 font-medium bg-slate-50/50">
+                    No hay cotizaciones que coincidan con tu búsqueda.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* --- Modales Inalterados --- */}
       {cotizacionMenuHistorialAbierta && menuHistorialPanelStyle && createPortal(
         <div
           ref={menuHistorialPanelRef}
           style={menuHistorialPanelStyle}
-          className="bg-white rounded-xl shadow-lg border border-slate-100 py-1"
+          className="bg-white rounded-xl shadow-xl border border-slate-100 py-1"
           data-menu-historial-cot-panel
         >
           <button
@@ -1191,7 +1207,7 @@ const CotizadorView = () => {
               setMenuHistorialId(null);
               setDetalleCotizacion(cotizacionMenuHistorialAbierta);
             }}
-            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-primary transition-colors"
           >
             Detalles
           </button>
@@ -1203,29 +1219,29 @@ const CotizadorView = () => {
                   setMenuHistorialId(null);
                   aplicarReplicacion(cotizacionMenuHistorialAbierta);
                 }}
-                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-primary transition-colors"
               >
                 Replicar cotización
               </button>
               <button
                 type="button"
                 onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'elegir')}
-                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-primary transition-colors"
               >
                 Nuevo lead
               </button>
               <button
                 type="button"
                 onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'existente')}
-                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-primary transition-colors"
               >
                 Vincular a lead existente
               </button>
             </>
           )}
           {esCotizacionEspecial(cotizacionMenuHistorialAbierta) && (
-            <p className="px-4 py-2 text-xs text-amber-900 bg-amber-50 border-t border-amber-100">
-              Cotización especial: no se puede replicar ni reasignar a otro prospecto.
+            <p className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 border-t border-amber-100">
+              Cotización especial: no se puede replicar ni reasignar.
             </p>
           )}
         </div>,
@@ -1250,7 +1266,7 @@ const CotizadorView = () => {
           aria-modal="true"
           aria-labelledby="aviso-pdf-vivo-titulo"
         >
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 border border-slate-100">
             <h2
               id="aviso-pdf-vivo-titulo"
               className="text-slate-900 font-bold text-lg mb-3"
@@ -1272,7 +1288,7 @@ const CotizadorView = () => {
               <button
                 type="button"
                 onClick={ejecutarPdfVivo}
-                className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white transition-colors"
+                className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white transition-colors shadow-sm"
               >
                 Generar PDF
               </button>
@@ -1291,7 +1307,7 @@ const CotizadorView = () => {
             <h2 className="text-slate-900 font-bold text-lg mb-3">Vinculación permanente</h2>
             <p className="text-slate-700 text-sm leading-relaxed">
               La cotización especial{' '}
-              <strong>{folioHistorialTexto(confirmacionVinculoEspecial.cotizacion.folio)}</strong>{' '}
+              <strong className="text-primary">{folioHistorialTexto(confirmacionVinculoEspecial.cotizacion.folio)}</strong>{' '}
               quedará asignada de forma permanente al prospecto que elijas. No podrá vincularse a otro lead después.
               ¿Desea continuar?
             </p>
@@ -1299,14 +1315,14 @@ const CotizadorView = () => {
               <button
                 type="button"
                 onClick={() => setConfirmacionVinculoEspecial(null)}
-                className="flex-1 px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50"
+                className="flex-1 px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 onClick={confirmarVinculoEspecialPermanente}
-                className="flex-1 px-4 py-3 bg-amber-500 text-slate-900 font-bold rounded-xl hover:bg-amber-400"
+                className="flex-1 px-4 py-3 bg-amber-500 text-slate-900 font-bold rounded-xl hover:bg-amber-400 shadow-sm transition-colors"
               >
                 Continuar
               </button>
@@ -1322,7 +1338,7 @@ const CotizadorView = () => {
           aria-modal="true"
           aria-labelledby="aviso-historial-destino-titulo"
         >
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 border border-slate-100">
             <h2
               id="aviso-historial-destino-titulo"
               className="text-slate-900 font-bold text-lg mb-3"
@@ -1333,11 +1349,11 @@ const CotizadorView = () => {
               {String(confirmacionHistorialDestino.cotizacion.lead_nombre || '').trim() ? (
                 <>
                   La cotización{' '}
-                  <strong>
+                  <strong className="text-primary">
                     {folioHistorialTexto(confirmacionHistorialDestino.cotizacion.folio)}
                   </strong>{' '}
                   se desvinculará del prospecto actual{' '}
-                  <span className="font-semibold text-blue-700">
+                  <span className="font-semibold text-primary">
                     {confirmacionHistorialDestino.cotizacion.lead_nombre}
                   </span>{' '}
                   y se asignará{' '}
@@ -1349,7 +1365,7 @@ const CotizadorView = () => {
               ) : (
                 <>
                   La cotización{' '}
-                  <strong>
+                  <strong className="text-primary">
                     {folioHistorialTexto(confirmacionHistorialDestino.cotizacion.folio)}
                   </strong>{' '}
                   se asignará{' '}
@@ -1372,7 +1388,7 @@ const CotizadorView = () => {
               <button
                 type="button"
                 onClick={confirmarDestinoHistorial}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+                className="flex-1 px-4 py-3 bg-primary text-white font-bold rounded-xl hover:brightness-95 shadow-sm transition-colors"
               >
                 Continuar
               </button>

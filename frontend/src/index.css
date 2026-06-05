@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* 1. Inyectamos nuestra variable al motor de Tailwind v4 */
+@theme {
+  --color-primary: var(--empresa-color);
+}
+
+/* 2. Definimos el color nativo por defecto en la raíz */
+:root {
+  --empresa-color: #f97316; /* Naranja de respaldo */
+}
+
 /* Marco naranja en historial de cotizaciones (borde de fila, 20% opacidad). */
 .cotizacion-especial-marco-historial > td {
   --marco-grosor: 4px;
@@ -7,7 +17,7 @@
   --marco-naranja: rgba(234, 85, 51, 0.2);
   border-top: var(--marco-grosor) solid transparent;
   border-bottom: var(--marco-grosor) solid transparent;
-  background:
+  background: 
     linear-gradient(var(--marco-relleno), var(--marco-relleno)) padding-box,
     linear-gradient(var(--marco-naranja), var(--marco-naranja)) border-box;
   background-clip: padding-box, border-box;
