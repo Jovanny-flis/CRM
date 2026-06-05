@@ -1,37 +1,15 @@
 @import "tailwindcss";
 
-:root {
-  --cinta-policial: repeating-linear-gradient(
-    -45deg,
-    #fef9c3 0,
-    #fef9c3 8px,
-    #1e293b 8px,
-    #1e293b 16px
-  );
-  --cinta-policial-fina: repeating-linear-gradient(
-    -45deg,
-    #fef9c3 0,
-    #fef9c3 4px,
-    #1e293b 4px,
-    #1e293b 8px
-  );
-}
-
-/* Relleno tipo cinta policial (bolita en tarjeta de lead). */
-.cotizacion-especial-cinta-relleno {
-  background: var(--cinta-policial-fina);
-}
-
-/* Marco tipo cinta policial en historial (solo borde de fila, sin relleno). */
+/* Marco naranja en historial de cotizaciones (borde de fila, 20% opacidad). */
 .cotizacion-especial-marco-historial > td {
   --marco-grosor: 4px;
   --marco-relleno: #ffffff;
-  --marco-cinta: var(--cinta-policial);
+  --marco-naranja: rgba(234, 85, 51, 0.2);
   border-top: var(--marco-grosor) solid transparent;
   border-bottom: var(--marco-grosor) solid transparent;
   background:
     linear-gradient(var(--marco-relleno), var(--marco-relleno)) padding-box,
-    var(--marco-cinta) border-box;
+    linear-gradient(var(--marco-naranja), var(--marco-naranja)) border-box;
   background-clip: padding-box, border-box;
 }
 

@@ -32,7 +32,7 @@ export const puedeUsarModoEspecial = (usuario) => {
 };
 
 export const claseMarcoCotizacionEspecial = () =>
-  'ring-4 ring-offset-2 ring-amber-400 shadow-[inset_0_0_0_2px_#1e293b] bg-gradient-to-br from-amber-50/40 to-slate-50/40';
+  'ring-4 ring-offset-2 ring-[#ea5533]/80 bg-gradient-to-br from-[#ea5533]/20 to-slate-50/40';
 
 export const claseFilaHistorialEspecial = () => 'cotizacion-especial-marco-historial';
 

@@ -520,7 +520,7 @@ const CotizadorView = () => {
               onClick={toggleModoCotizacionEspecial}
               className={`px-4 py-2 font-bold rounded-xl border-2 transition-colors ${
                 modoCotizacionEspecial
-                  ? 'bg-amber-100 border-amber-500 text-amber-950'
+                  ? 'bg-[#ea5533]/80 border-[#ea5533] text-white'
                   : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
               }`}
             >
@@ -538,7 +538,7 @@ const CotizadorView = () => {
       </header>
 
       {modoCotizacionEspecial && (
-        <div className="mb-6 p-4 bg-amber-50 text-amber-950 rounded-xl border-2 border-amber-500 text-sm font-medium">
+        <div className="mb-6 p-4 bg-[#ea5533]/80 text-white rounded-xl border-2 border-[#ea5533] text-sm font-medium">
           Modo cotización especial activo: los límites de parámetros no aplican. Al guardar como agente se solicitará autorización.
         </div>
       )}
@@ -558,7 +558,7 @@ const CotizadorView = () => {
       <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${modoCotizacionEspecial ? 'p-1 rounded-[1.75rem] ' + claseMarcoCotizacionEspecial() : ''}`}>
         
         {/* EL FORMULARIO EXPANDIDO */}
-        <div className={`lg:col-span-2 bg-white rounded-3xl p-8 shadow-sm border border-slate-200 ${modoCotizacionEspecial ? 'ring-2 ring-amber-400/50' : ''}`}>
+        <div className={`lg:col-span-2 bg-white rounded-3xl p-8 shadow-sm border border-slate-200 ${modoCotizacionEspecial ? 'ring-2 ring-[#ea5533]/80' : ''}`}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
             <div className="md:col-span-2">
