@@ -4,9 +4,19 @@ import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
+import {
+  AvisoCotizacionParametrosEspeciales,
+  BolitaCotizacionEspecial,
+} from '../components/CotizacionEspecialIndicadores';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
 import { descargarPdfPorCotizacionId } from '../lib/generarPdfCotizacion';
+import {
+  cotizacionPendienteAutorizacion,
+  leadPendienteAutorizacion,
+  leadTieneCotizacionEspecial,
+  puedeAutorizarEspecial,
+} from '../lib/cotizacionEspecial';
 
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
@@ -70,6 +80,7 @@ function LeadsView() {
   const [mostrarAvisoCancelacion, setMostrarAvisoCancelacion] = useState(false);
   const [estatusOriginalCodigo, setEstatusOriginalCodigo] = useState('activo');
   const [confirmacionMovimiento, setConfirmacionMovimiento] = useState(null);
+  const [procesandoAutorizacion, setProcesandoAutorizacion] = useState(false);
 
   const fetchTablero = () => {
     if (!empresaId) {
@@ -172,8 +183,27 @@ function LeadsView() {
     return estatusBloqueaCotizacion(est);
   };
 
+  const ejecutarAutorizacionEspecialLead = async (cotizacionId, rechazar) => {
+    if (!cotizacionId || procesandoAutorizacion) return;
+    setProcesandoAutorizacion(true);
+    try {
+      const ruta = rechazar ? 'rechazar-especial' : 'autorizar-especial';
+      await api.post(`/cotizaciones/${cotizacionId}/${ruta}`);
+      alert(rechazar ? 'Cotización especial rechazada.' : 'Cotización especial autorizada.');
+      fetchTablero();
+    } catch (error) {
+      alert(error.response?.data?.error || error.message);
+    } finally {
+      setProcesandoAutorizacion(false);
+    }
+  };
+
   const handleGenerarPdf = async () => {
     if (!leadEditando?.cotizacion_id || generandoPdf) return;
+    if (cotizacionPendienteAutorizacion(leadEditando)) {
+      alert('El PDF no está disponible hasta autorizar la cotización especial.');
+      return;
+    }
     setGenerandoPdf(true);
     try {
       await descargarPdfPorCotizacionId(leadEditando.cotizacion_id, {
@@ -296,6 +326,13 @@ function LeadsView() {
   };
 
   const estiloTarjetaLead = (lead) => {
+    if (leadPendienteAutorizacion(lead)) {
+      return {
+        backgroundColor: '#fffbeb',
+        borderColor: '#1e293b',
+        boxShadow: 'inset 0 0 0 2px #f59e0b',
+      };
+    }
     if (esLeadCancelado(lead)) {
       return { backgroundColor: '#f1f5f9', borderColor: '#cbd5e1' };
     }
@@ -778,7 +815,7 @@ function LeadsView() {
                     </div>
                     
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-medium max-w-[120px]">
                           <User size={12} className="text-blue-500 shrink-0" />
                           <span className="truncate" title={lead.agente_nombre || 'Desconocido'}>
@@ -789,7 +826,39 @@ function LeadsView() {
                           {lead.medio || MEDIO_DEFAULT}
                         </span>
                       </div>
+                      {leadTieneCotizacionEspecial(lead) && (
+                        <BolitaCotizacionEspecial className="shrink-0 ml-2" />
+                      )}
                     </div>
+
+                    {leadPendienteAutorizacion(lead) && lead.cotizacion_id && (
+                      <div className="mt-3 pt-3 border-t border-amber-200/80">
+                        {puedeAutorizarEspecial(usuarioLogueado) ? (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={procesandoAutorizacion}
+                              onClick={() => ejecutarAutorizacionEspecialLead(lead.cotizacion_id, false)}
+                              className="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-green-600 text-white hover:bg-green-500"
+                            >
+                              Aceptar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={procesandoAutorizacion}
+                              onClick={() => ejecutarAutorizacionEspecialLead(lead.cotizacion_id, true)}
+                              className="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-red-600 text-white hover:bg-red-500"
+                            >
+                              Rechazar
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wide text-center">
+                            Pendiente de autorización
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
                 })}
@@ -843,6 +912,10 @@ function LeadsView() {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
               </div>
+
+              {leadEditando && leadTieneCotizacionEspecial(leadEditando) && (
+                <AvisoCotizacionParametrosEspeciales className="mb-6" />
+              )}
 
               <div className={`grid grid-cols-1 ${leadEditando ? 'lg:grid-cols-2 gap-8' : ''}`}>
                 

@@ -18,6 +18,7 @@
 --   • cotizaciones: parámetros del cotizador (tasa, pagos, seguro, GPS, etc.) para réplica idéntica
 --   • gps_proveedores + gps_productos — catálogo GPS por empresa (cotizador)
 --   • leads: tipo_persona (PM | PF | PFAE, opcional)
+--   • lead_estatus pendiente_autorizacion + cotizaciones es_especial / autorizacion_estado
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
 --   • lib/canales.js — catálogo raíz al crear empresa (POST /empresas); no re-sembrar en GET /medios
@@ -376,6 +377,15 @@ CALL crm_add_column_if_missing('cotizaciones', 'rentas_deposito_valor',
 
 -- Modificar el ENUM de roles en usuarios
 ALTER TABLE usuarios MODIFY COLUMN rol ENUM('super_admin', 'admin_empresa', 'supervisor', 'agente', 'agente_cotizador') DEFAULT 'agente';
+
+-- -----------------------------------------------------------------------------
+-- 13) Cotización especial — flag y estado de autorización
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('cotizaciones', 'es_especial',
+  "TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Parámetros fuera de límites estándar' AFTER `renta_mensual_con_iva`");
+CALL crm_add_column_if_missing('cotizaciones', 'autorizacion_estado',
+  "VARCHAR(20) NULL DEFAULT NULL COMMENT 'pendiente | aprobada | rechazada; NULL si no aplica' AFTER `es_especial`");
+
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)
 -- ----------------------------------------------------------------------------

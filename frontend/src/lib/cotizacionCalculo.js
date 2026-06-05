@@ -1,4 +1,8 @@
-const { parseNumeroFormulario } = require('./cotizacion-formulario-pdf');
+/**
+ * Cálculo y validación del cotizador (paridad con lib/cotizacion-calculo.js del backend).
+ */
+
+import { parseNumeroFormulario } from './cotizacionFormulario';
 
 const tablaResidual = [
   { min: 12, max: 12, valores: { Sedan: 67, SUV: 70, Camionetas: 68, Lujo: 60, Tractocamion: 65, Autobus: 65 } },
@@ -18,18 +22,15 @@ const tablaResidualOtro = [
   { min: 61, max: 72, valores: 31 },
 ];
 
-function calcularPMT(tasaAnual, n, pv, fv) {
+const calcularPMT = (tasaAnual, n, pv, fv) => {
   const r = (tasaAnual * 1.16) / 12 / 100;
   const factor = Math.pow(1 + r, n);
-  const numerador = (pv * r * factor) - (fv * r);
   const denominador = factor - 1;
   if (denominador === 0) return 0;
-  return numerador / denominador;
-}
+  return ((pv * r * factor) - (fv * r)) / denominador;
+};
 
-/** Misma lógica que el cotizador frontend (totales para PDF y guardado). */
-function calcularResultadosCotizacion(formData, opciones = {}) {
-  const modoEspecial = opciones.modoEspecial === true;
+export const calcularErroresYResultados = (formData, modoEspecial = false) => {
   const err = {};
   const valorActivo = parseNumeroFormulario(formData.valorActivo);
   const plazo = parseInt(formData.plazo, 10) || 36;
@@ -58,7 +59,6 @@ function calcularResultadosCotizacion(formData, opciones = {}) {
       const rango = tablaResidualOtro.find((r) => plazo >= r.min && plazo <= r.max);
       maxResidualPermitido = valorActivo * ((rango ? rango.valores : 20) / 100);
     }
-
     if (residualReal > maxResidualPermitido && valorActivo > 0) err.residual = 'Excede el tope permitido.';
     if ((residualReal + inicialReal) > valorActivo && valorActivo > 0) {
       err.general = 'Suma inicial + residual excede 100%.';
@@ -133,6 +133,4 @@ function calcularResultadosCotizacion(formData, opciones = {}) {
       rentaMensualTotal,
     },
   };
-}
-
-module.exports = { calcularResultadosCotizacion };
+};

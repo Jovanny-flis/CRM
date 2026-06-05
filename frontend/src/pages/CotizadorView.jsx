@@ -26,6 +26,16 @@ import {
   leadsPorNombreUnico,
   vincularCotizacionActiva,
 } from '../lib/destinoProspectoCotizacion';
+import { calcularErroresYResultados } from '../lib/cotizacionCalculo';
+import {
+  claseFilaHistorialEspecial,
+  claseMarcoCotizacionEspecial,
+  cotizacionEspecialBloqueaAccionesHistorial,
+  cotizacionPendienteAutorizacion,
+  esCotizacionEspecial,
+  puedeAutorizarEspecial,
+  puedeUsarModoEspecial,
+} from '../lib/cotizacionEspecial';
 
 /** Automotriz: marca - modelo - version - año */
 const camposActivoCompletos = (data) => {
@@ -133,11 +143,15 @@ const CotizadorView = () => {
   const menuHistorialPanelRef = useRef(null);
   const [gpsCatalogo, setGpsCatalogo] = useState([]);
   const [panelGpsAbierto, setPanelGpsAbierto] = useState(false);
+  const [modoCotizacionEspecial, setModoCotizacionEspecial] = useState(false);
+  const [confirmacionVinculoEspecial, setConfirmacionVinculoEspecial] = useState(null);
+  const [procesandoAutorizacion, setProcesandoAutorizacion] = useState(false);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
 
-  const puedeGuardarOPdf = cotizacionListaParaAccion(formData, errores);
+  const puedeGuardar = cotizacionListaParaAccion(formData, errores);
+  const puedeGenerarPdf = puedeGuardar && !modoCotizacionEspecial;
 
   const leadsNombreUnico = useMemo(() => leadsPorNombreUnico(leads), [leads]);
 
@@ -259,6 +273,27 @@ const CotizadorView = () => {
     setFormData(formDataCotizadorVacio());
     setFolioOrigenReplicacion(null);
     setReferenciaNombreClave('');
+    setModoCotizacionEspecial(false);
+  };
+
+  const toggleModoCotizacionEspecial = () => {
+    setModoCotizacionEspecial((prev) => !prev);
+  };
+
+  const ejecutarAutorizacionEspecial = async (cotizacionId, rechazar) => {
+    if (procesandoAutorizacion) return;
+    setProcesandoAutorizacion(true);
+    try {
+      const ruta = rechazar ? 'rechazar-especial' : 'autorizar-especial';
+      await api.post(`/cotizaciones/${cotizacionId}/${ruta}`);
+      alert(rechazar ? 'Cotización especial rechazada.' : 'Cotización especial autorizada.');
+      cargarHistorial();
+      cargarLeads();
+    } catch (error) {
+      alert(error.response?.data?.error || error.message);
+    } finally {
+      setProcesandoAutorizacion(false);
+    }
   };
 
   const handleLeadChange = (e) => {
@@ -317,6 +352,7 @@ const CotizadorView = () => {
         empresaId,
         usuarioId: usuarioLogueado.id,
         leadId: null,
+        esEspecial: modoCotizacionEspecial,
       }));
 
       if (finalLeadId) {
@@ -328,8 +364,10 @@ const CotizadorView = () => {
       }
 
       const avisoMigracion = resCot.data?.aviso ? `\n\n⚠️ ${resCot.data.aviso}` : '';
-      alert(`✅ Cotización guardada con éxito.${avisoMigracion}`);
+      const avisoAuth = resCot.data?.aviso_autorizacion ? `\n\n${resCot.data.aviso_autorizacion}` : '';
+      alert(`✅ Cotización guardada con éxito.${avisoMigracion}${avisoAuth}`);
       setFolioOrigenReplicacion(null);
+      setModoCotizacionEspecial(false);
       cargarHistorial();
     } catch (error) {
       const detalle = error.response?.data?.error || error.message;
@@ -377,7 +415,22 @@ const CotizadorView = () => {
 
   const solicitarDestinoHistorial = (cotizacion, pasoInicial) => {
     setMenuHistorialId(null);
+    if (cotizacionEspecialBloqueaAccionesHistorial(cotizacion)) {
+      if (cotizacion.lead_id) {
+        alert('Esta cotización especial ya está vinculada de forma permanente a un prospecto.');
+        return;
+      }
+      setConfirmacionVinculoEspecial({ cotizacion, pasoInicial });
+      return;
+    }
     setConfirmacionHistorialDestino({ cotizacion, pasoInicial });
+  };
+
+  const confirmarVinculoEspecialPermanente = () => {
+    const ctx = confirmacionVinculoEspecial;
+    if (!ctx) return;
+    setConfirmacionVinculoEspecial(null);
+    setConfirmacionHistorialDestino({ cotizacion: ctx.cotizacion, pasoInicial: ctx.pasoInicial });
   };
 
   const confirmarDestinoHistorial = () => {
@@ -393,101 +446,22 @@ const CotizadorView = () => {
   };
 
   useEffect(() => {
-    let err = {};
-    // MODIFICADO: Removemos las comas antes de convertir a número para el cálculo
-    const valorActivo = parseNumeroFormulario(formData.valorActivo);
-    const plazo = parseInt(formData.plazo) || 36;
-    const tasaAnual = parseFloat(formData.tasaAnual) || 0;
-
-    if (tasaAnual < 16 || tasaAnual > 40) err.tasa = "La tasa debe estar entre 16% y 40%.";
-    if (plazo < 12 || plazo > 72) err.plazo = "El plazo debe ser entre 12 y 72 meses.";
-
-    const piInput = parseNumeroFormulario(formData.pagoInicial);
-    const inicialReal = formData.isPagoInicialPct ? valorActivo * (piInput / 100) : piInput;
-    if (inicialReal > valorActivo * 0.5) err.pagoInicial = "El pago inicial no puede exceder el 50% del valor.";
-
-    const resInput = parseNumeroFormulario(formData.residual);
-    const residualReal = formData.isResidualPct ? valorActivo * (resInput / 100) : resInput;
-    
-    let maxResidualPermitido = 0;
-    if (formData.tipoArrendamiento === "Automotriz") {
-      const rango = tablaResidual.find(r => plazo >= r.min && plazo <= r.max);
-      maxResidualPermitido = valorActivo * ((rango ? (rango.valores[formData.tipoVehiculo] || 20) : 20) / 100);
-    } else {
-      const rango = tablaResidualOtro.find(r => plazo >= r.min && plazo <= r.max);
-      maxResidualPermitido = valorActivo * ((rango ? rango.valores : 20) / 100);
-    }
-
-    if (residualReal > maxResidualPermitido && valorActivo > 0) err.residual = "Excede el tope permitido.";
-    if ((residualReal + inicialReal) > valorActivo && valorActivo > 0) err.general = "Suma inicial + residual excede 100%.";
-
-    const comInput = parseNumeroFormulario(formData.comision);
-    const comisionReal = formData.isComisionPct ? comInput * (valorActivo - inicialReal) / 100 : comInput;
-
-    const esAutomotriz = formData.tipoArrendamiento === 'Automotriz';
-    const gpsInput = esAutomotriz ? parseNumeroFormulario(formData.gps) : 0;
-    const gpsContado = esAutomotriz && formData.isGpsContado ? gpsInput : 0;
-    const serviciosReal = esAutomotriz ? parseNumeroFormulario(formData.servicios) : 0;
-
-    const seguroInput = parseNumeroFormulario(formData.seguro);
-    let seguroContado = formData.isSeguroContado ? seguroInput : 0;
-    let seguroFinanciadoBase = !formData.isSeguroContado ? seguroInput : 0;
-
-    const seguroSub = seguroContado / 1.16;
-    const gpsSub = gpsContado / 1.16;
-    const serviciosSub = serviciosReal / 1.16;
-    const pagoInicialSub = inicialReal / 1.16;
-    const comisionSub = comisionReal / 1.16;
-
-    const seguroFinMensual = !formData.isSeguroContado ? calcularPMT(tasaAnual, (formData.isSeguroAnual ? 12 : plazo), seguroFinanciadoBase, 0) : 0;
-    const gpsFinMensual = esAutomotriz && !formData.isGpsContado
-      ? calcularPMT(tasaAnual, plazo, gpsInput, 0)
-      : 0;
-
-    const pvActivo = valorActivo - inicialReal;
-    const r = (tasaAnual * 1.16) / 12 / 100;
-    const factor = Math.pow(1 + r, plazo);
-    const rentaSoloActivo = (factor - 1) !== 0 ? ((pvActivo * r * factor) - (residualReal * r)) / (factor - 1) : 0;
-    
-    const rentaTotalCruda = rentaSoloActivo + seguroFinMensual + gpsFinMensual;
-    const rentaMensualSubtotal = rentaTotalCruda / 1.16;
-    const rentaMensualIVA = rentaMensualSubtotal * 0.16;
-    const rentaMensualTotal = rentaMensualSubtotal + rentaMensualIVA;
-
-// 1. NUEVA LÓGICA: Rentas en Depósito
-    const isRentas = formData.isRentasDeposito === true;
-    const cantidadRentas = parseInt(formData.rentasDepositoCantidad, 10) || 0;
-    
-    // Calculamos el subtotal de estas rentas (usando la renta SIN IVA)
-    const rentasDepositoSubtotal = isRentas ? (rentaMensualSubtotal * cantidadRentas) : 0;
-    
-    // Calculamos el total de las rentas (para guardarlo en la base de datos)
-    const rentasDepositoValor = isRentas ? (rentaMensualTotal * cantidadRentas) : 0;
-
-    // 2. Cálculos del Desembolso Inicial (Ahora sí, desglosado desde la raíz)
-    const pagoInicialSubtotal = pagoInicialSub + comisionSub + seguroSub + gpsSub + serviciosSub + rentasDepositoSubtotal;
-    const pagoInicialIVA = pagoInicialSubtotal * 0.16;
-    const pagoInicialTotal = pagoInicialSubtotal + pagoInicialIVA;
-
-setErrores(err);
-    setRes({ 
-      residualReal, pagoInicialSub, comisionSub, gpsSub, seguroSub, serviciosSub, 
-      
-      // 👇 AGREGAMOS NUESTRAS NUEVAS VARIABLES AQUÍ 👇
-      rentasDepositoSubtotal, rentasDepositoValor,
-      
-      pagoInicialSubtotal, pagoInicialIVA, pagoInicialTotal, rentaSoloActivo, 
-      gpsFinMensual, seguroFinMensual, rentaMensualSubtotal, rentaMensualIVA, rentaMensualTotal 
-    });
-  }, [formData]);
+    const { errores: err, res: calculo } = calcularErroresYResultados(formData, modoCotizacionEspecial);
+    setErrores(err);
+    setRes(calculo);
+  }, [formData, modoCotizacionEspecial]);
 
   const handleGuardarCotizacion = () => {
-    if (!puedeGuardarOPdf || guardando) return;
+    if (!puedeGuardar || guardando) return;
     setModalDestino({ modo: 'guardar' });
   };
 
   const solicitarPdfVivo = () => {
-    if (!puedeGuardarOPdf || generandoPdf) return;
+    if (!puedeGenerarPdf || generandoPdf) return;
+    if (modoCotizacionEspecial) {
+      alert('El PDF no está disponible en cotización especial hasta que sea autorizada.');
+      return;
+    }
     setAvisoPdfVivoAbierto(true);
   };
 
@@ -506,6 +480,10 @@ setErrores(err);
 
   const handleGenerarPdfDetalle = async () => {
     if (!detalleCotizacion || generandoPdfDetalle) return;
+    if (cotizacionPendienteAutorizacion(detalleCotizacion)) {
+      alert('El PDF no está disponible hasta autorizar la cotización especial.');
+      return;
+    }
     setGenerandoPdfDetalle(true);
     try {
       await generarPdfDesdeCotizacion(detalleCotizacion, detalleCotizacion.lead_nombre);
@@ -535,13 +513,35 @@ setErrores(err);
           <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Cotizador de Arrendamiento</h1>
           <p className="text-slate-500 mt-1">Flising.</p>
         </div>
-        <button 
-          onClick={limpiarFormulario} 
-          className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
-        >
-          Limpiar Campos
-        </button>
+        <div className="flex flex-wrap gap-2 justify-end">
+          {puedeUsarModoEspecial(usuarioLogueado) && (
+            <button
+              type="button"
+              onClick={toggleModoCotizacionEspecial}
+              className={`px-4 py-2 font-bold rounded-xl border-2 transition-colors ${
+                modoCotizacionEspecial
+                  ? 'bg-[#ea5533]/80 border-[#ea5533] text-white'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {modoCotizacionEspecial ? '✓ Cotización especial' : 'Cotización especial'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={limpiarFormulario}
+            className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
+          >
+            Limpiar Campos
+          </button>
+        </div>
       </header>
+
+      {modoCotizacionEspecial && (
+        <div className="mb-6 p-4 bg-[#ea5533]/80 text-white rounded-xl border-2 border-[#ea5533] text-sm font-medium">
+          Modo cotización especial activo: los límites de parámetros no aplican. Al guardar como agente se solicitará autorización.
+        </div>
+      )}
 
       {folioOrigenReplicacion != null && (
         <div className="mb-6 p-4 bg-amber-50 text-amber-900 rounded-xl border border-amber-200 text-sm font-medium">
@@ -555,10 +555,10 @@ setErrores(err);
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${modoCotizacionEspecial ? 'p-1 rounded-[1.75rem] ' + claseMarcoCotizacionEspecial() : ''}`}>
         
         {/* EL FORMULARIO EXPANDIDO */}
-        <div className="lg:col-span-2 bg-white rounded-3xl p-8 shadow-sm border border-slate-200">
+        <div className={`lg:col-span-2 bg-white rounded-3xl p-8 shadow-sm border border-slate-200 ${modoCotizacionEspecial ? 'ring-2 ring-[#ea5533]/80' : ''}`}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
             <div className="md:col-span-2">
@@ -1017,15 +1017,16 @@ setErrores(err);
           <div className="flex gap-3">
             <button 
               onClick={handleGuardarCotizacion} 
-              disabled={guardando || !puedeGuardarOPdf} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || !puedeGuardarOPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
+              disabled={guardando || !puedeGuardar}
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${guardando || !puedeGuardar ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
             >
               {guardando ? 'Guardando...' : '💾 Guardar DB'}
             </button>
             <button 
               onClick={solicitarPdfVivo}
-              disabled={!puedeGuardarOPdf || generandoPdf} 
-              className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGuardarOPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
+              disabled={!puedeGenerarPdf || generandoPdf}
+              className={`flex-1 py-4 rounded-xl font-black transition-all ${!puedeGenerarPdf || generandoPdf ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-[#ea5533] hover:opacity-90 text-white shadow-lg shadow-[#ea5533]/30'}`}
+              title={modoCotizacionEspecial ? 'PDF no disponible en cotización especial hasta autorizar' : undefined}
             >
               {generandoPdf ? 'Generando PDF…' : '📄 Generar PDF'}
             </button>
@@ -1052,7 +1053,7 @@ setErrores(err);
           />
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-separate border-spacing-0">
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
                 <th className="p-4 rounded-tl-xl">Folio</th>
@@ -1072,7 +1073,14 @@ setErrores(err);
             </thead>
             <tbody>
               {historialFiltrado.map(cot => (
-  <tr key={cot.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+  <tr
+    key={cot.id}
+    className={`transition-colors ${
+      esCotizacionEspecial(cot)
+        ? claseFilaHistorialEspecial()
+        : 'border-b border-slate-100 hover:bg-slate-50'
+    }`}
+  >
     
     <td className="p-4 text-sm font-black text-slate-800">
       {cot.folio ? `FL-${String(cot.folio).padStart(3, '0')}` : '---'}
@@ -1110,6 +1118,29 @@ setErrores(err);
     <td className="p-4 text-sm font-black text-slate-800">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
 
     <td className="p-4 text-sm">
+      {cotizacionPendienteAutorizacion(cot) && puedeAutorizarEspecial(usuarioLogueado) && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          <button
+            type="button"
+            disabled={procesandoAutorizacion}
+            onClick={() => ejecutarAutorizacionEspecial(cot.id, false)}
+            className="px-2 py-1 text-xs font-bold rounded-lg bg-green-600 text-white hover:bg-green-500"
+          >
+            Aceptar
+          </button>
+          <button
+            type="button"
+            disabled={procesandoAutorizacion}
+            onClick={() => ejecutarAutorizacionEspecial(cot.id, true)}
+            className="px-2 py-1 text-xs font-bold rounded-lg bg-red-600 text-white hover:bg-red-500"
+          >
+            Rechazar
+          </button>
+        </div>
+      )}
+      {cotizacionPendienteAutorizacion(cot) && !puedeAutorizarEspecial(usuarioLogueado) && (
+        <span className="block text-[10px] font-bold text-amber-800 mb-1 uppercase">Pendiente autorización</span>
+      )}
       <div className="relative inline-block" data-menu-historial-cot>
         <button
           ref={menuHistorialId === cot.id ? menuHistorialTriggerRef : undefined}
@@ -1164,30 +1195,39 @@ setErrores(err);
           >
             Detalles
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMenuHistorialId(null);
-              aplicarReplicacion(cotizacionMenuHistorialAbierta);
-            }}
-            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            Replicar cotización
-          </button>
-          <button
-            type="button"
-            onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'elegir')}
-            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            Nuevo lead
-          </button>
-          <button
-            type="button"
-            onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'existente')}
-            className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            Vincular a lead existente
-          </button>
+          {!cotizacionEspecialBloqueaAccionesHistorial(cotizacionMenuHistorialAbierta) && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuHistorialId(null);
+                  aplicarReplicacion(cotizacionMenuHistorialAbierta);
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Replicar cotización
+              </button>
+              <button
+                type="button"
+                onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'elegir')}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Nuevo lead
+              </button>
+              <button
+                type="button"
+                onClick={() => solicitarDestinoHistorial(cotizacionMenuHistorialAbierta, 'existente')}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Vincular a lead existente
+              </button>
+            </>
+          )}
+          {esCotizacionEspecial(cotizacionMenuHistorialAbierta) && (
+            <p className="px-4 py-2 text-xs text-amber-900 bg-amber-50 border-t border-amber-100">
+              Cotización especial: no se puede replicar ni reasignar a otro prospecto.
+            </p>
+          )}
         </div>,
         document.body,
       )}
@@ -1235,6 +1275,40 @@ setErrores(err);
                 className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white transition-colors"
               >
                 Generar PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmacionVinculoEspecial && (
+        <div
+          className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+          role="alertdialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 border-2 border-amber-500">
+            <h2 className="text-slate-900 font-bold text-lg mb-3">Vinculación permanente</h2>
+            <p className="text-slate-700 text-sm leading-relaxed">
+              La cotización especial{' '}
+              <strong>{folioHistorialTexto(confirmacionVinculoEspecial.cotizacion.folio)}</strong>{' '}
+              quedará asignada de forma permanente al prospecto que elijas. No podrá vincularse a otro lead después.
+              ¿Desea continuar?
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmacionVinculoEspecial(null)}
+                className="flex-1 px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarVinculoEspecialPermanente}
+                className="flex-1 px-4 py-3 bg-amber-500 text-slate-900 font-bold rounded-xl hover:bg-amber-400"
+              >
+                Continuar
               </button>
             </div>
           </div>

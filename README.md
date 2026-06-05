@@ -15,10 +15,10 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Empresas           | CRUD de empresas (alcance `super_admin` en API). |
 | Usuarios y agentes | Alta, edición y baja sincronizada con Firebase Auth; jerarquía por rol y empresa (incluye **`agente_cotizador`**: acceso acotado al cotizador y directorio maestro). |
 | Pipelines y etapas | Embudos y etapas por empresa; catálogo de **estatus** de prospectos (flags de suma, movilidad y **bloquea folio asignado**). |
-| Leads              | **Oportunidades** en el embudo (tabla `leads`): varias por empresa con el **mismo nombre** de cliente; en el Kanban se distinguen por etapa, estatus, folio activo y demás datos de la tarjeta. Canales (`lead_sources`), estatus (`lead_estatus`), **tipo de persona** opcional (`PM`, `PF`, `PFAE`), drag & drop, confirmación al avanzar de etapa, `lead_etapas_historial` y cancelación con motivo. **Un folio activo por lead** en tablero; **Cambiar cotización** en el modal sustituye el folio visible y libera los demás (`lead_id` NULL), salvo **folio congelado** (`bloquea_cotizacion` en el estatus o estatus **cancelado**): sin vincular, sin cambiar ni mover el folio a otro lead; **Replicar cotización** sigue permitido. |
+| Leads              | **Oportunidades** en el embudo (tabla `leads`): varias por empresa con el **mismo nombre** de cliente; en el Kanban se distinguen por etapa, estatus, folio activo y demás datos de la tarjeta. Canales (`lead_sources`), estatus (`lead_estatus`), **tipo de persona** opcional (`PM`, `PF`, `PFAE`), drag & drop, confirmación al avanzar de etapa, `lead_etapas_historial` y cancelación con motivo. **Un folio activo por lead** en tablero; **Cambiar cotización** en el modal sustituye el folio visible y libera los demás (`lead_id` NULL), salvo **folio congelado** (`bloquea_cotizacion`, estatus **cancelado** o **pendiente autorización**): sin vincular ni cambiar cotización en modal; **Replicar cotización** sigue permitido salvo folio **especial** (ver cotizador). Estatus **`pendiente_autorizacion`**: incluye en suma y vista predeterminada, no mueve en embudo; **supervisor** y **admin_empresa** de la empresa ven **Aceptar** / **Rechazar** en la tarjeta (rechazo → **cancelado**); el agente ve el estatus sin botones y puede editar datos del lead. |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). No visible para `agente_cotizador`. |
 | Directorio Maestro | Vista tabular tipo Excel (`/maestro-leads`): cruce leads ↔ cotización activa, estatus y agente. Filtro por rol vía `GET /api/reportes/maestro-leads` (query `empresa_id`, `usuario_id`, `role`). |
-| Cotizador          | Cálculo y folio secuencial (FL-001…). **Automotriz** / **Otro** (GPS y trámites solo en Automotriz). Parámetros §10 en BD para **réplica idéntica**. **Catálogo GPS** por empresa (proveedores → productos con precio IVA); selector en formulario y administración en cotizador (`AdminGpsCatalogoPanel` / `SelectorGpsPrecio`). **Guardar DB** abre modal: solo cotización, **nueva oportunidad** o **vincular a existente** (`ModalDestinoProspecto`; excluye oportunidades con folio congelado). El select del formulario lista **un nombre por persona** y solo **copia** nombre/tipo de persona; no vincula al guardar. **Réplica** sin nombre ni prospecto; el operador completa y decide al guardar o desde el historial (menú ⋮). **Generar PDF** (Puppeteer en servidor: preview `POST /api/cotizaciones/pdf` y descarga por id `GET /api/cotizaciones/:id/pdf`, con token) y guardado exigen obligatorios y sin errores de cálculo. **Detalle** de cotización en modal reutilizable (`ModalDetalleCotizacion` / `PanelDetalleCotizacion`) desde cotizador y tablero. API CRUD `/api/cotizaciones*` pública por producto; PDF y SPA exigen login en rutas protegidas. |
+| Cotizador          | Cálculo y folio secuencial (FL-001…). **Automotriz** / **Otro** (GPS y trámites solo en Automotriz). Parámetros §10 en BD para **réplica idéntica**. **Catálogo GPS** por empresa (proveedores → productos con precio IVA); selector en formulario y administración en cotizador (`AdminGpsCatalogoPanel` / `SelectorGpsPrecio`). **Cotización especial** (toggle junto a *Limpiar Campos*): sin límites de tasa/plazo/residual; solo obligatorios mínimos para guardar; marco visual en formulario; folios especiales con marco en historial, **sin replicar ni reasignar** a otro prospecto (vinculación **permanente** con confirmación la primera vez). **Agente** / **agente_cotizador**: al guardar en modo especial → prospecto `pendiente_autorizacion` (si hay lead), cotización `autorizacion_estado = pendiente`, correo SMTP a supervisores y admin de la empresa (con folio y enlace a `/leads`); **sin PDF** hasta autorizar. **Supervisor** / **admin_empresa**: sin correo; cotización aprobada y lead activo. **Guardar DB** abre modal: solo cotización, **nueva oportunidad** o **vincular a existente** (`ModalDestinoProspecto`; excluye oportunidades con folio congelado). El select del formulario lista **un nombre por persona** y solo **copia** nombre/tipo de persona; no vincula al guardar. **Réplica** sin nombre ni prospecto (no aplica a folios ya marcados como especiales). **Generar PDF** (Puppeteer: `POST /api/cotizaciones/pdf`, `GET /api/cotizaciones/:id/pdf`, con token) bloqueado en modo especial o mientras `autorizacion_estado = pendiente`. **Detalle** en `ModalDetalleCotizacion` / `PanelDetalleCotizacion`. API CRUD `/api/cotizaciones*` pública por producto; autorización especial y PDF con token. |
 
 ---
 
@@ -72,6 +72,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 │  verificarToken (Firebase ID token) + revisarRol (rol en BD) │
 │  Rutas /api/cotizaciones* CRUD sin token (públicas por producto) │
 │  PDF /api/cotizaciones/pdf y /:id/pdf con verificarToken       │
+│  POST …/autorizar-especial y …/rechazar-especial (token)       │
 │  Router lib/reporteMaestro.js → /api/reportes/maestro-leads    │
 └──────────────┬──────────────────────────────┬─────────────────┘
                │ mysql2 pool (db.js)            │ Firebase Admin (firebase.js + credencial)
@@ -100,6 +101,8 @@ CRM/
 ├── lib/
 │   ├── canales.js
 │   ├── cotizacion-calculo.js        # Lógica financiera compartida (PDF y validación servidor)
+│   ├── cotizacion-especial.js       # Autorización, vínculo permanente y flags al guardar
+│   ├── cotizacion-especial-email.js # Correo de solicitud tras guardar (agente)
 │   ├── cotizacion-formulario-pdf.js
 │   ├── cotizacion-guardar.js
 │   ├── cotizacion-vinculo.js
@@ -158,7 +161,9 @@ CRM/
         ├── layouts/
         │   └── DashboardLayout.jsx
         ├── lib/
+        │   ├── cotizacionCalculo.js         # Validación/cálculo del formulario (modo especial)
         │   ├── cotizacionDetalleVista.js
+        │   ├── cotizacionEspecial.js        # Helpers UI (marco, permisos, pendiente)
         │   ├── cotizacionFormulario.js
         │   ├── destinoProspectoCotizacion.js
         │   ├── generarPdfCotizacion.js   # Descarga PDF vía API (blob + nombre archivo)
@@ -184,7 +189,7 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 - Servidor MySQL o MariaDB.
 - Proyecto Firebase (Auth habilitado, aplicación web, cuenta de servicio para Admin SDK).
 - **Chrome o Chromium** para generar PDFs con Puppeteer (el `postinstall` del backend intenta descargar Chrome; alternativa: Chrome del sistema y `PUPPETEER_EXECUTABLE_PATH` en `.env`).
-- Opcional: SMTP para rutas que envían correo desde el backend.
+- SMTP (`EMAIL_*` en `.env`) para correo de bienvenida de usuarios y **solicitud de cotización especial** (un correo por folio guardado por agente; requiere `FRONTEND_BASE_URL` para el enlace al CRM).
 
 ---
 
@@ -209,12 +214,12 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
    ```
 
 5. Variables de entorno:
-   - Copiar `.env.example` a `.env` en la raíz y completar `DB_*`, `PORT`, `CORS_ORIGINS` y `EMAIL_*` si se usan las rutas SMTP del backend.
+   - Copiar `.env.example` a `.env` en la raíz y completar `DB_*`, `PORT`, `CORS_ORIGINS`, `EMAIL_*` y `FRONTEND_BASE_URL` si se usan correo SMTP (bienvenida y cotización especial).
    - Copiar `frontend/.env.example` a `frontend/.env` y completar `VITE_API_URL` y las variables `VITE_FIREBASE_*`.
 
 6. Crear la base ejecutando `db/schema.sql` en el servidor SQL (crea `flising_crm` y tablas).
 
-7. Si la BD ya existía o es instalación que debe incluir canales jerárquicos, estatus de prospectos (incl. **`bloquea_cotizacion`**), trazabilidad de etapas, `tipo_persona` en leads y columnas del cotizador (activo automotriz, parámetros §10 para réplica, etc.), aplicar la migración unificada (segura de re-ejecutar):
+7. Si la BD ya existía o es instalación que debe incluir canales jerárquicos, estatus de prospectos (incl. **`bloquea_cotizacion`** y **`pendiente_autorizacion`**), trazabilidad de etapas, `tipo_persona` en leads, columnas del cotizador (activo automotriz, parámetros §10, **`es_especial` / `autorizacion_estado`**), aplicar la migración unificada (segura de re-ejecutar):
    ```bash
    mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
    ```
@@ -253,7 +258,7 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 | `EMAIL_USER` | Usuario SMTP |
 | `EMAIL_PASS` | Contraseña SMTP |
 | `CORS_ORIGINS` | Orígenes del navegador autorizados para llamar a la API, separados por comas. Si está vacía o ausente, no se admite ningún origen en peticiones cross-origin. |
-| `FRONTEND_BASE_URL` | Base del frontend para enlaces absolutos (documentada en `.env.example`); el código del backend puede seguir usando URLs fijas en algunos flujos (ver Deuda técnica). |
+| `FRONTEND_BASE_URL` | Base del frontend para enlaces absolutos (p. ej. `http://localhost:5173`). Usada en el correo de **cotización especial** (`/leads`). Otros flujos (bienvenida de usuario) pueden seguir URLs fijas en código (ver Deuda técnica). |
 | `PUPPETEER_EXECUTABLE_PATH` | (Opcional) Ruta al binario de Chrome/Chromium si no se usa el descargado por Puppeteer. |
 
 ### Frontend (`frontend/.env`)
@@ -292,9 +297,10 @@ Relaciones principales:
 | Oportunidad (prospecto) | `leads` | Un trato en el embudo: etapa, estatus, agente, historial de etapas. |
 | Cotización | `cotizaciones` | Folio con parámetros financieros; puede existir sin lead (`lead_id` NULL). |
 | Cotización **activa** del lead | Única fila con `lead_id` = ese lead | La que el operador eligió al vincular; el tablero y `GET /leads` muestran esa. Al vincular otra, las previas del mismo lead se **liberan**, salvo **folio congelado** (ver estatus). |
-| Folio **congelado** | `lead_estatus.bloquea_cotizacion` o `codigo = cancelado` | Sin vincular cotización al lead, sin cambiar la activa ni reasignar ese folio a otro lead. Aplica de forma retroactiva a leads ya en ese estatus. **Replicar** genera folio nuevo sin alterar el vínculo original. |
+| Folio **congelado** | `lead_estatus.bloquea_cotizacion`, `codigo = cancelado` o `codigo = pendiente_autorizacion` | Sin vincular cotización al lead ni **Cambiar cotización** en modal; sin reasignar folio a otro lead (salvo reglas de **cotización especial**). Aplica de forma retroactiva. **Replicar** genera folio nuevo sin alterar el vínculo original (no desde historial si el folio origen es especial). |
+| **Cotización especial** | `cotizaciones.es_especial`, `cotizaciones.autorizacion_estado` | Solo si el operador activó el toggle al guardar (`es_especial = 1` en body). Estados: `pendiente`, `aprobada`, `rechazada` (NULL si no es especial). Vinculación **permanente** al primer `lead_id` asignado; no aparece en buscador de cotizaciones libres del modal de lead. |
 
-**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `tipo_persona` (`PM` | `PF` | `PFAE`, opcional), `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo` / `cancelado` y personalizados por empresa (`incluir_en_suma`, `permite_mover`, **`bloquea_cotizacion`**); tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`; en `cotizaciones`: `folio` (AUTO_INCREMENT, FL-001…), `nombre_activo`, `marca`, `modelo`, `version`, `anio` (solo Automotriz), `tipo_arrendamiento` y parámetros del cotizador (`tasa_anual`, pago inicial/residual/comisión/seguro/GPS/servicios y flags `is_*`) para réplica y guardado fiel; tablas **`gps_proveedores`** y **`gps_productos`** (catálogo GPS por empresa); rol **`agente_cotizador`** en `usuarios.rol`.
+**Extensiones v2** (tras `db/migrations/schema-v2.sql`): `lead_sources.parent_id`; en `leads`: `estatus_id`, `tipo_persona` (`PM` | `PF` | `PFAE`, opcional), `motivo_desactivacion`, `desactivado_at` y columna legada `activo` (solo migración histórica); tabla `lead_estatus` con estatus sistema `activo`, **`pendiente_autorizacion`** y `cancelado`, más personalizados por empresa (`incluir_en_suma`, `permite_mover`, **`bloquea_cotizacion`**); tabla `lead_etapas_historial` con `alcanzado_at` por par `(lead_id, stage_id)`; en `cotizaciones`: `folio` (AUTO_INCREMENT, FL-001…), activo automotriz, parámetros §10 del formulario, **`es_especial`** y **`autorizacion_estado`**; tablas **`gps_proveedores`** y **`gps_productos`**; rol **`agente_cotizador`** en `usuarios.rol`.
 
 DDL base en `db/schema.sql`:
 
@@ -476,7 +482,7 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 
 | Método | Endpoint | Roles | Aislamiento por empresa |
 | ------ | -------- | ----- | ----------------------- |
-| GET | `/leads/:empresa_id` | **Ninguna (pública)** | Incluye `tipo_persona`, `nombre_etapa`, estatus del catálogo y datos de la **cotización activa** (join por folio más reciente con `lead_id` en ese prospecto). Campos `cotizacion_*` en la respuesta. La SPA envía token, pero la API no exige autenticación en esta ruta (ver Deuda técnica). |
+| GET | `/leads/:empresa_id` | **Ninguna (pública)** | Incluye `tipo_persona`, `nombre_etapa`, estatus del catálogo y datos de la **cotización activa** (join por folio más reciente con `lead_id` en ese prospecto). Campos `cotizacion_*` en la respuesta, incl. `cotizacion_es_especial` y `cotizacion_autorizacion_estado`. La SPA envía token, pero la API no exige autenticación en esta ruta (ver Deuda técnica). |
 | POST | `/leads` | `super_admin`, `supervisor`, `admin_empresa`, `agente`, `agente_cotizador` | `empresa_id` del body debe coincidir con el del usuario; acepta `tipo_persona` opcional; registra etapa inicial |
 | PUT | `/leads/:id` | `super_admin`, `supervisor`, `admin_empresa`, `agente` | `validarRecursoEmpresa` (empresa del lead); acepta `tipo_persona` opcional |
 | PUT | `/leads/:id/etapa` | mismos | `validarRecursoEmpresa`; mueve en el embudo y aplica reglas de `lead_etapas_historial` |
@@ -510,7 +516,7 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 | Archivo | Uso |
 | ------- | --- |
 | `db/schema.sql` | Instalación nueva: esquema base completo. **No modificar.** |
-| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Incluye canales, estatus (`bloquea_cotizacion`), historial de etapas, columnas del cotizador (`folio`, activo automotriz, **§10 parámetros del formulario**), `leads.tipo_persona`, catálogo GPS y rol `agente_cotizador`. |
+| `db/migrations/schema-v2.sql` | **Única migración acumulada**, idempotente. Incluye canales, estatus (`bloquea_cotizacion`, **`pendiente_autorizacion`**), historial de etapas, columnas del cotizador (`folio`, activo automotriz, **§10**, **`es_especial` / `autorizacion_estado`**), `leads.tipo_persona`, catálogo GPS y rol `agente_cotizador`. |
 | `db/migrations/README.md` | Instrucciones y tabla de registro `_crm_migraciones`. |
 
 ```bash
@@ -524,14 +530,15 @@ mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
 | `leads` | `activo` (legado), `motivo_desactivacion`, `desactivado_at`, `estatus_id`, `tipo_persona` |
 | `lead_sources` | `parent_id` + FK; limpieza de raíces no estándar e inserción del catálogo de 9 canales por empresa |
 | `leads.medio` | Normalización única a `Contacto directo` (no se repite si ya consta en `_crm_migraciones`) |
-| `lead_estatus` | Tabla + semilla `activo` / `cancelado` por empresa; columnas `incluir_en_suma`, `permite_mover`, **`bloquea_cotizacion`**; `cancelado` con `bloquea_cotizacion = 1`; asigna `estatus_id` según `activo` histórico |
+| `lead_estatus` | Tabla + semilla `activo`, **`pendiente_autorizacion`** y `cancelado` por empresa; columnas `incluir_en_suma`, `permite_mover`, **`bloquea_cotizacion`**; `cancelado` y `pendiente_autorizacion` con `bloquea_cotizacion = 1`; asigna `estatus_id` según `activo` histórico |
+| `cotizaciones` (§13) | `es_especial`, `autorizacion_estado` (`pendiente`, `aprobada`, `rechazada`) |
 | `lead_etapas_historial` | Tabla con `UNIQUE (lead_id, stage_id)` y `alcanzado_at`; sin backfill en leads existentes |
 | `cotizaciones` | `folio`, `nombre_activo`, `marca`, `modelo`, `version`, `anio` |
 | `cotizaciones` (§10) | `tipo_arrendamiento`, `tasa_anual`, `pago_inicial_valor`, `is_pago_inicial_pct`, `residual_valor`, `is_residual_pct`, `comision_valor`, `is_comision_pct`, `seguro_valor`, `is_seguro_contado`, `is_seguro_anual`, `gps_valor`, `is_gps_contado`, `servicios_valor` |
 | `gps_proveedores` / `gps_productos` | Catálogo GPS por empresa (precio con IVA en producto) |
 | `usuarios.rol` | Enum ampliado con `agente_cotizador` |
 
-**Complemento en runtime:** `lib/canales.js`, `lib/estatus-leads.js`, `lib/lead-etapas-historial.js`, `lib/leads.js`, `lib/cotizacion-guardar.js`, `lib/cotizacion-vinculo.js`, `lib/gps-catalogo.js`, `lib/cotizacion-calculo.js`, `lib/generar-pdf-cotizacion.js` y en `index.js` la función `activarCotizacionEnLead` (un folio activo por lead al vincular, con validación de folio congelado).
+**Complemento en runtime:** `lib/canales.js`, `lib/estatus-leads.js`, `lib/lead-etapas-historial.js`, `lib/leads.js`, `lib/cotizacion-guardar.js`, `lib/cotizacion-vinculo.js`, `lib/cotizacion-especial.js`, `lib/cotizacion-especial-email.js`, `lib/gps-catalogo.js`, `lib/cotizacion-calculo.js`, `lib/generar-pdf-cotizacion.js` y en `index.js` la función `activarCotizacionEnLead` (un folio activo por lead al vincular, con validación de folio congelado y **vínculo permanente** de cotizaciones especiales).
 
 **Tipo de persona del prospecto (`leads.tipo_persona`):**
 
@@ -539,7 +546,7 @@ mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
 - Captura en alta/edición de prospectos (`LeadsView.jsx`), en el cotizador al crear o vincular un lead (`CotizadorView.jsx`) y constantes compartidas en `frontend/src/constants/tipoPersona.js`.
 - En el tablero Kanban se muestra un badge con la abreviatura (entre el folio de cotización y el estatus del lead) solo cuando tiene valor.
 
-**Estatus de prospectos:** catálogo por empresa en Pipelines (sección bajo el embudo, componente `AdminEstatusLeads.jsx`). Sistema: `activo` (inicial, suma, mueve, sin congelar folio) y `cancelado` (oculto en suma, bloqueado en embudo, **folio congelado** siempre, motivo obligatorio). Los personalizados definen color, suma, movilidad y opcionalmente **Bloquea folio asignado** (`bloquea_cotizacion`): impide cualquier vinculación o cambio de cotización en leads con ese estatus (retroactivo). La app usa `estatus_id`; no el booleano `activo`.
+**Estatus de prospectos:** catálogo por empresa en Pipelines (sección bajo el embudo, componente `AdminEstatusLeads.jsx`). Sistema: `activo` (inicial, suma, mueve, sin congelar folio); **`pendiente_autorizacion`** (suma, **no** mueve en embudo, **folio congelado** en modal, color ámbar; asignado al guardar cotización especial de agente hasta aceptar/rechazar); y `cancelado` (oculto en suma, bloqueado en embudo, **folio congelado** siempre, motivo obligatorio). Los personalizados definen color, suma, movilidad y opcionalmente **Bloquea folio asignado** (`bloquea_cotizacion`). La app usa `estatus_id`; no el booleano `activo`.
 
 **Trazabilidad de etapas (`lead_etapas_historial`):**
 
@@ -582,14 +589,16 @@ Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer co
 
 | Método | Endpoint | Notas |
 | ------ | -------- | ----- |
-| POST | `/cotizaciones` | Crea cotización con **folio nuevo** (AUTO_INCREMENT). Body según §10 en `lib/cotizacion-guardar.js`. Si el body trae `lead_id`, tras el INSERT se ejecuta `activarCotizacionEnLead` (un folio activo; libera los demás del mismo lead; falla si el lead tiene folio congelado). La SPA suele crear el folio sin `lead_id` y vincular después con `PUT …/vincular-lead`. |
+| POST | `/cotizaciones` | Crea cotización con **folio nuevo** (AUTO_INCREMENT). Body según §10 en `lib/cotizacion-guardar.js`; opcional `es_especial: true` (resuelve `autorizacion_estado` según rol del `usuario_id` en body: agente → `pendiente` + correo; supervisor/admin → `aprobada`). Si el body trae `lead_id`, tras el INSERT se ejecuta `activarCotizacionEnLead`. La SPA suele crear el folio sin `lead_id` y vincular después con `PUT …/vincular-lead`. |
+| POST | `/cotizaciones/:id/autorizar-especial` | `verificarToken` + `supervisor` o `admin_empresa` + `validarRecursoEmpresa` | Pasa cotización a `aprobada`; si tiene `lead_id`, el prospecto vuelve a `activo`. |
+| POST | `/cotizaciones/:id/rechazar-especial` | mismos | `autorizacion_estado = rechazada`; lead vinculado → `cancelado` con motivo fijo. |
 | GET | `/cotizaciones/lead/:lead_id` | Cotizaciones con `lead_id` = ese prospecto (en la práctica, el folio activo; las liberadas no aparecen porque tienen `lead_id` NULL) |
 | GET | `/cotizaciones/empresa/:empresa_id` | Listado por empresa; filtra por `usuario_id` si `rol=agente` o `agente_cotizador` en query |
-| GET | `/cotizaciones/buscar/:empresa_id` | Cotizaciones **libres** (`lead_id IS NULL`); `termino` filtra folio/activo (buscador del modal de lead) |
-| POST | `/cotizaciones/pdf` | `verificarToken` + `ROLES_COTIZADOR` | PDF **en vivo** desde `formData` en body (sin folio persistido). Respuesta `application/pdf` con `Content-Disposition`. |
-| GET | `/cotizaciones/:id/pdf` | `verificarToken` + `ROLES_COTIZADOR` + `validarRecursoEmpresa` | PDF de cotización guardada; query opcional `nombre_prospecto`. `agente` / `agente_cotizador` solo si `cotizaciones.usuario_id` coincide. |
+| GET | `/cotizaciones/buscar/:empresa_id` | Cotizaciones **libres** (`lead_id IS NULL` y `es_especial = 0`); `termino` filtra folio/activo (buscador del modal de lead; excluye especiales) |
+| POST | `/cotizaciones/pdf` | `verificarToken` + `ROLES_COTIZADOR` | PDF **en vivo** desde `formData`. Rechaza si `modo_cotizacion_especial: true` en body. |
+| GET | `/cotizaciones/:id/pdf` | `verificarToken` + `ROLES_COTIZADOR` + `validarRecursoEmpresa` | PDF de cotización guardada; **403** si `es_especial` y `autorizacion_estado = pendiente`. Query opcional `nombre_prospecto`. |
 | GET | `/cotizaciones/:id` | Ninguna | Detalle completo (réplica desde leads u otras pantallas). Definida **después** de rutas con segmento fijo (`lead`, `empresa`, `buscar`, `:id/pdf`) |
-| PUT | `/cotizaciones/:id/vincular-lead` | Ninguna | Asigna la cotización al lead como **folio activo** (no crea folio nuevo); libera las demás del mismo lead y actualiza `leads.valor`. Rechaza destino u origen con folio congelado. |
+| PUT | `/cotizaciones/:id/vincular-lead` | Ninguna | Asigna la cotización al lead como **folio activo**; libera las demás del mismo lead y actualiza `leads.valor`. Rechaza folio congelado y **reasignación** de cotización especial ya vinculada a otro lead. Si la cotización especial está `pendiente`, el lead pasa a `pendiente_autorizacion`. |
 
 **Generación de PDF (servidor):**
 
@@ -609,12 +618,21 @@ Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer co
 | GPS / trámites e impuestos | Editables; entran en renta y pago inicial | No aplican: UI deshabilitada, valores vacíos, cálculo y guardado en **0** |
 | Seguro | Editable | Editable |
 | Residual máximo | Tabla por tipo de vehículo y plazo | Tabla `tablaResidualOtro` |
+| Modo **cotización especial** (toggle) | Sin validación de tasa/plazo/residual/inicial | Igual |
 
-Al cambiar el select de **Automotriz → Otro**, el front limpia marca/modelo/versión/año, GPS y trámites.
+Al cambiar el select de **Automotriz → Otro**, el front limpia marca/modelo/versión/año, GPS y trámites. La validación relajada en modo especial está en `frontend/src/lib/cotizacionCalculo.js` y `lib/cotizacion-calculo.js` (`modoEspecial` / `opciones.modoEspecial`).
+
+**Cotización especial:**
+
+- **Toggle** en cabecera del cotizador (`CotizadorView.jsx`); visible para `agente`, `agente_cotizador`, `supervisor` y `admin_empresa` (no `super_admin` global sin empresa).
+- **Guardar:** body `es_especial: 1` vía `formDataAPayloadCotizacion`; backend `lib/cotizacion-especial.js` + correo `lib/cotizacion-especial-email.js` (destinatarios: todos los `supervisor` y `admin_empresa` de la `empresa_id` del folio).
+- **Historial:** filas con marco tipo cinta; menú ⋮ sin *Replicar* ni *Vincular* en folios especiales; confirmación de **vinculación permanente** antes del modal de destino si el folio aún no tiene `lead_id`; botones **Aceptar** / **Rechazar** para roles autorizadores (`POST …/autorizar-especial` y `…/rechazar-especial`).
+- **Leads:** tarjeta con borde destacado en `pendiente_autorizacion`; mismos botones en la tarjeta; filtro predeterminado sigue mostrando el estatus (incluye en suma).
+- **PDF:** bloqueado en preview (`modo_cotizacion_especial`), en detalle/historial/leads mientras `autorizacion_estado = pendiente`.
 
 **Réplica de cotización:**
 
-- **Historial** (`CotizadorView`): menú ⋮ por fila → *Replicar cotización* (también con prospecto ya vinculado).
+- **Historial** (`CotizadorView`): menú ⋮ por fila → *Replicar cotización* (no en filas con `es_especial`; también con prospecto ya vinculado en cotizaciones normales).
 - **Modal de lead** (`LeadsView`): enlace *Replicar cotización* cuando hay cotización asignada (también en leads cancelados o con folio congelado); navega a `/cotizador` con `replicarCotizacionId`. *Cambiar cotización* oculto si el estatus congela el folio.
 - `cotizacionAFormData(..., { paraReplicar: true })`: mismos parámetros financieros y de activo; **`nombre_cliente`**, `tipo_persona` y prospecto vacíos (el operador los asigna).
 - Al **Guardar DB** tras replicar: mismo modal que un alta normal (folio nuevo; la cotización origen no se modifica).
@@ -635,15 +653,18 @@ Al cambiar el select de **Automotriz → Otro**, el front limpia marca/modelo/ve
 **Un folio activo por lead (backend):**
 
 - Función `activarCotizacionEnLead` en `index.js`: valida con `assertPuedeVincularCotizacionEnLead` (`lib/cotizacion-vinculo.js`); pone `lead_id` NULL en todas las cotizaciones del lead y asigna la elegida; sincroniza `leads.valor`.
-- **Folio congelado:** lead con `bloquea_cotizacion = 1` o estatus `cancelado` — no acepta vinculación (ni primera cotización); una cotización ya ligada a ese lead no puede reasignarse a otro.
+- **Folio congelado:** lead con `bloquea_cotizacion = 1`, estatus `cancelado` o **`pendiente_autorizacion`** — no acepta vinculación ni cambio de cotización en modal.
+- **Cotización especial:** una vez con `lead_id`, no puede reasignarse (`assertPuedeVincularCotizacionEspecial` en `lib/cotizacion-vinculo.js`).
 - Usada en `POST /cotizaciones` (si viene `lead_id`), `PUT /cotizaciones/:id/vincular-lead` y `PUT /leads/:lead_id/vincular-cotizacion`.
 
 **Archivos clave:**
 
 - `frontend/src/components/ModalDestinoProspecto.jsx` — modal de destino al guardar o desde historial; excluye leads con folio congelado del selector.
 - `frontend/src/components/ModalDetalleCotizacion.jsx` / `PanelDetalleCotizacion.jsx` — lectura enriquecida de parámetros y KPIs; acciones PDF y réplica según contexto.
-- `frontend/src/lib/destinoProspectoCotizacion.js` — alta de oportunidad, `vincular-lead`, etiqueta del modal de destino, deduplicación de nombres en el cotizador y helpers `leadBloqueaCotizacion` / `estatusBloqueaCotizacion`.
-- `frontend/src/lib/cotizacionFormulario.js` — estado del formulario ↔ BD y payload de guardado; convención de imágenes PDF (`VARIANTE_IMAGEN_ACTIVO_PDF`).
+- `frontend/src/lib/destinoProspectoCotizacion.js` — alta de oportunidad, `vincular-lead`, etiqueta del modal de destino, deduplicación de nombres y helpers `leadBloqueaCotizacion` / `estatusBloqueaCotizacion` (incl. `pendiente_autorizacion`).
+- `frontend/src/lib/cotizacionEspecial.js` — marco visual, permisos de autorización y detección de pendiente.
+- `frontend/src/lib/cotizacionCalculo.js` — cálculo y validación del formulario (paridad con backend; flag modo especial).
+- `frontend/src/lib/cotizacionFormulario.js` — estado del formulario ↔ BD y payload de guardado (`es_especial`); convención de imágenes PDF (`VARIANTE_IMAGEN_ACTIVO_PDF`).
 - `frontend/src/lib/cotizacionDetalleVista.js` — filas y etiquetas para el panel de detalle.
 - `lib/cotizacion-guardar.js` — normalización e INSERT (completo / legado).
 
@@ -667,9 +688,9 @@ Roles en base de datos: `super_admin`, `admin_empresa`, `supervisor`, `agente`, 
 | --- | ----------------- | ----- |
 | `super_admin` | Dashboard, Leads, Directorio Maestro, Cotizador, Agentes, Pipelines, Empresas | Acceso global en API (`validarEmpresaParam` / `validarRecursoEmpresa` siempre pasa). |
 | `admin_empresa` | Igual salvo Empresas | CRUD estatus, pipelines, catálogo GPS. |
-| `supervisor` | Igual salvo Empresas y Pipelines | Ve equipo en reporte maestro; edita GPS. |
-| `agente` | Dashboard, Leads, Directorio Maestro, Cotizador | Embudo y cotizaciones propias en listados filtrados. |
-| `agente_cotizador` | **Solo** Directorio Maestro y Cotizador | Pensado para operación centrada en cotización; puede crear leads vía cotizador (`POST /leads`) pero no ve Dashboard ni tablero Kanban en menú. |
+| `supervisor` | Igual salvo Empresas y Pipelines | Ve equipo en reporte maestro; edita GPS; **autoriza o rechaza** cotizaciones especiales de su empresa. |
+| `agente` | Dashboard, Leads, Directorio Maestro, Cotizador | Embudo y cotizaciones propias en listados filtrados; puede solicitar **cotización especial** (pendiente hasta autorización). |
+| `agente_cotizador` | **Solo** Directorio Maestro y Cotizador | Igual que agente respecto a cotización especial y `POST /leads`; no ve Dashboard ni tablero Kanban en menú. |
 
 **Backend:** Cadena de middlewares en `middlewares/authMiddleware.js`:
 
