@@ -92,13 +92,14 @@ export async function descargarPdfPorCotizacionId(
 }
 
 /** PDF en vivo desde el cotizador (sin folio; no persiste). */
-export async function descargarPdfPreview(formData) {
+export async function descargarPdfPreview(formData, { modoCotizacionEspecial = false } = {}) {
   try {
     const response = await api.post(
       '/cotizaciones/pdf',
       {
         formData,
         nombre_prospecto: formData.nombre_cliente,
+        modo_cotizacion_especial: modoCotizacionEspecial,
       },
       { responseType: 'blob' },
     );

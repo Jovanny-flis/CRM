@@ -29,7 +29,7 @@ SHOW TABLES LIKE 'lead_estatus';
 
 | Archivo | Rol |
 | ------- | --- |
-| `schema-v2.sql` | Única migración acumulada: canales, estatus de prospectos, columnas de cancelación en `leads`, tabla `lead_etapas_historial`, activo automotriz en `cotizaciones` y **§10** parámetros del cotizador (`tipo_arrendamiento`, `tasa_anual`, pagos, seguro, GPS, trámites, flags). |
+| `schema-v2.sql` | Única migración acumulada: canales, estatus de prospectos (**`pendiente_autorizacion`**), columnas de cancelación en `leads`, tabla `lead_etapas_historial`, activo automotriz en `cotizaciones`, **§10** parámetros del cotizador y **§13** cotización especial (`es_especial`, `autorizacion_estado`). |
 
 Las migraciones parciales `v001`–`v004` fueron retiradas; su contenido está unificado aquí.
 
@@ -38,5 +38,6 @@ Las migraciones parciales `v001`–`v004` fueron retiradas; su contenido está u
 Tras `schema-v2.sql`, el backend completa catálogos y timestamps en runtime:
 
 - `lib/canales.js` — raíces estándar al crear empresa (`POST /api/empresas`)
-- `lib/estatus-leads.js` — estatus sistema y `leads.estatus_id` pendientes en `GET` de leads/estatus
+- `lib/estatus-leads.js` — estatus sistema (`activo`, `pendiente_autorizacion`, `cancelado`) y `leads.estatus_id` pendientes en `GET` de leads/estatus
+- `lib/cotizacion-especial.js` — flags al guardar, autorización y vínculo permanente
 - `lib/lead-etapas-historial.js` — timestamp de etapa inicial al crear lead y al avanzar en `PUT /api/leads/:id/etapa`

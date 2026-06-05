@@ -79,10 +79,13 @@ export const vincularCotizacionActiva = async (api, cotizacionId, leadId) => {
   await api.put(`/cotizaciones/${cotizacionId}/vincular-lead`, { lead_id: leadId });
 };
 
-/** Prospecto con folio congelado (cancelado o estatus con bloqueo). */
+const CODIGO_PENDIENTE_AUTORIZACION = 'pendiente_autorizacion';
+
+/** Prospecto con folio congelado (cancelado, pendiente autorización o estatus con bloqueo). */
 export const leadBloqueaCotizacion = (lead) => {
   if (!lead) return false;
   if (lead.estatus_codigo === 'cancelado') return true;
+  if (lead.estatus_codigo === CODIGO_PENDIENTE_AUTORIZACION) return true;
   return lead.estatus_bloquea_cotizacion === 1 || lead.estatus_bloquea_cotizacion === true;
 };
 

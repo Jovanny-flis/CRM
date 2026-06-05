@@ -154,7 +154,7 @@ export const cotizacionAFormData = (cot, { paraReplicar = false } = {}) => {
 };
 
 /** Payload para POST /cotizaciones (totales calculados + parámetros del formulario). */
-export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId, leadId }) => {
+export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId, leadId, esEspecial = false }) => {
   const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
     ? [formData.marca, formData.modelo, formData.version, formData.anio]
         .map((s) => String(s || '').trim())
@@ -203,5 +203,6 @@ export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId
     pago_inicial: res.pagoInicialTotal,
     renta_mensual_sin_iva: res.rentaMensualSubtotal,
     renta_mensual_con_iva: res.rentaMensualTotal,
+    es_especial: esEspecial ? 1 : 0,
   };
 };

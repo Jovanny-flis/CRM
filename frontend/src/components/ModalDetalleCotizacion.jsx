@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import api from '../api';
 import PanelDetalleCotizacion from './PanelDetalleCotizacion';
+import { AvisoCotizacionParametrosEspeciales } from './CotizacionEspecialIndicadores';
+import { esCotizacionEspecial } from '../lib/cotizacionEspecial';
 
 function ModalDetalleCotizacion({
   abierto,
@@ -106,14 +108,19 @@ function ModalDetalleCotizacion({
         )}
 
         {!cargando && !error && cotizacion && (
-          <PanelDetalleCotizacion
-            cotizacion={cotizacion}
-            prospectoNombre={nombreProspecto}
-            agenteNombre={agenteNombre ?? cotizacion.agente_nombre}
-            onGenerarPdf={onGenerarPdf}
-            generandoPdf={generandoPdf}
-            mostrarAcciones
-          />
+          <div className="flex flex-col gap-3 min-h-0 max-h-[92vh]">
+            {esCotizacionEspecial(cotizacion) && (
+              <AvisoCotizacionParametrosEspeciales className="shrink-0" />
+            )}
+            <PanelDetalleCotizacion
+              cotizacion={cotizacion}
+              prospectoNombre={nombreProspecto}
+              agenteNombre={agenteNombre ?? cotizacion.agente_nombre}
+              onGenerarPdf={onGenerarPdf}
+              generandoPdf={generandoPdf}
+              mostrarAcciones
+            />
+          </div>
         )}
       </div>
     </div>
