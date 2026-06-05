@@ -1,20 +1,46 @@
 import { Link, useLocation } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { cerrarSesion, CLAVE_USUARIO, obtenerTabId } from '../lib/sesion';
+import api from '../api'; // Importamos la api para hacer la consulta
 
 const Sidebar = () => {
   const location = useLocation();
 
+  // Leemos la memoria inicial para tener algo que mostrar rápido
   const usuarioGuardado = localStorage.getItem(CLAVE_USUARIO);
-  const usuario = usuarioGuardado ? JSON.parse(usuarioGuardado) : { nombre: 'Cargando...', rol: 'agente' };
+  const usuarioMemoria = usuarioGuardado ? JSON.parse(usuarioGuardado) : { id: null, nombre: 'Cargando...', rol: 'agente' };
 
-useEffect(() => {
-    // Tomamos el color hexadecimal directo de tu base de datos
-    const colorHex = usuario?.color_principal || usuario?.empresa?.color_principal || '#f97316'; 
-    
-    // Lo inyectamos a la variable raíz
-    document.documentElement.style.setProperty('--empresa-color', colorHex);
-  }, [usuario]);
+  // Usamos un estado para poder actualizar la info si encontramos un color nuevo en la BD
+  const [usuario, setUsuario] = useState(usuarioMemoria);
+
+  useEffect(() => {
+    // 1. Configuramos el color inicial (el de la memoria) para no dejarlo sin diseño
+    const colorHexInicial = usuario?.color_principal || usuario?.empresa?.color_principal || '#f97316'; 
+    document.documentElement.style.setProperty('--empresa-color', colorHexInicial);
+
+    // 2. Si el usuario tiene un ID, le preguntamos a la base de datos por la información más fresca
+    if (usuario.id) {
+      api.get(`/usuarios/${usuario.id}`)
+        .then(res => {
+          const datosFrescos = res.data;
+          
+          // Si el backend nos responde, sacamos el color de su empresa actual
+          const colorFresco = datosFrescos?.empresa?.color_principal || '#f97316';
+          
+          // Actualizamos la variable CSS de inmediato
+          document.documentElement.style.setProperty('--empresa-color', colorFresco);
+
+          // (Opcional) Puedes actualizar el estado del usuario por si cambió su nombre o rol
+          setUsuario(prev => ({
+            ...prev,
+            ...datosFrescos
+          }));
+        })
+        .catch(err => {
+          console.warn("No se pudo refrescar el color desde la DB, usando caché:", err);
+        });
+    }
+  }, [usuario.id]); // Solo se ejecuta cuando detecta un usuario.id
 
   // Menú reorganizado con agrupaciones y iconos SVG limpios (estilo minimalista)
   const menuItems = [
@@ -61,13 +87,13 @@ useEffect(() => {
       {/* 2. Tarjeta de Perfil de Usuario */}
       <div className="px-5 mb-4">
         <div className="p-3 border border-slate-100 rounded-2xl flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
           </div>
           <div className="flex-1 overflow-hidden">
             <h3 className="text-sm font-bold text-slate-800 truncate">{usuario.nombre}</h3>
             {/* El rol usa el color primary para resaltar, igual que tu imagen de referencia */}
-            <p className="text-xs text-primary font-medium truncate capitalize">{usuario.rol.replace('_', ' ')}</p>
+            <p className="text-xs text-primary font-medium truncate capitalize">{usuario?.rol?.replace('_', ' ')}</p>
           </div>
         </div>
       </div>
@@ -99,7 +125,7 @@ useEffect(() => {
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                     }`}
                   >
-                    <svg className={`w-5 h-5 ${isActive ? 'text-primary' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`w-5 h-5 shrink-0 ${isActive ? 'text-primary' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       {item.icon}
                     </svg>
                     {item.name}
@@ -117,7 +143,7 @@ useEffect(() => {
           onClick={manejarCerrarSesion}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-red-600 rounded-xl transition-colors"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
           Cerrar Sesión
         </button>
       </div>
