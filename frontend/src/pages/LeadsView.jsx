@@ -12,6 +12,7 @@ import {
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
 import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
 import { descargarPdfPorCotizacionId } from '../lib/generarPdfCotizacion';
+import { formatMontoEnFormulario, parseNumeroFormulario } from '../lib/cotizacionFormulario';
 import {
   cotizacionPendienteAutorizacion,
   leadPendienteAutorizacion,
@@ -23,8 +24,13 @@ const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
 
 const valorEstimadoValido = (valor) => {
-  const n = parseFloat(valor);
-  return Number.isFinite(n) && n > 0;
+  const n = parseNumeroFormulario(valor);
+  return n > 0;
+};
+
+const formatearValorFormulario = (valor) => {
+  if (valor === null || valor === undefined || valor === '') return '';
+  return formatMontoEnFormulario(String(valor));
 };
 
 const valorMostrableLead = (lead) => {
@@ -239,9 +245,11 @@ function LeadsView() {
       nombre: leadCompleto.nombre || '',
       correo: leadCompleto.correo || '',
       telefono: leadCompleto.telefono || '',
-      valor: leadCompleto.cotizacion_id
-        ? (leadCompleto.cotizacion_valor_activo ?? leadCompleto.valor ?? '')
-        : (leadCompleto.valor || ''),
+      valor: formatearValorFormulario(
+        leadCompleto.cotizacion_id
+          ? (leadCompleto.cotizacion_valor_activo ?? leadCompleto.valor ?? '')
+          : (leadCompleto.valor || ''),
+      ),
       medio: leadCompleto.medio || '',
       tipo_persona: leadCompleto.tipo_persona || '',
       usuario_id: leadCompleto.usuario_id || '',
@@ -382,8 +390,8 @@ function LeadsView() {
 
     const tieneCotizacion = Boolean(leadEditando?.cotizacion_id);
     const valorNumerico = tieneCotizacion
-      ? parseFloat(leadEditando.cotizacion_valor_activo ?? formData.valor)
-      : parseFloat(formData.valor);
+      ? parseFloat(leadEditando.cotizacion_valor_activo ?? parseNumeroFormulario(formData.valor))
+      : parseNumeroFormulario(formData.valor);
 
     if (!tieneCotizacion && !valorEstimadoValido(formData.valor)) {
       alert('El valor estimado es obligatorio y debe ser mayor a cero.');
@@ -981,12 +989,17 @@ function LeadsView() {
                           {leadEditando?.cotizacion_id ? 'Valor del activo (cotización)' : 'Valor Estimado ($) *'}
                         </label>
                         <input 
-                          type="number" required min="0.01" step="0.01" 
+                          type="text"
+                          inputMode="decimal"
+                          required
                           value={formData.valor} 
-                          onChange={(e) => setFormData({...formData, valor: e.target.value})} 
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            valor: formatMontoEnFormulario(e.target.value),
+                          })} 
                           disabled={modoSoloLectura || Boolean(leadEditando?.cotizacion_id)}
                           className={`w-full border rounded-xl px-4 py-3 outline-none font-bold transition-all ${modoSoloLectura || leadEditando?.cotizacion_id ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
-                          placeholder="Ej. 15000" 
+                          placeholder="Ej. 350,000" 
                         />
                       </div>
                       <div className={modoSoloLectura ? "pointer-events-none opacity-80" : ""}>
