@@ -47,7 +47,6 @@ const reporteMaestro = require('./lib/reporteMaestro');
 const {
     generarPdfDesdeFormulario,
     generarPdfDesdeCotizacion,
-    cerrarNavegadorPdf,
 } = require('./lib/generar-pdf-cotizacion');
 
 const ROLES_COTIZADOR = ['super_admin', 'supervisor', 'admin_empresa', 'agente', 'agente_cotizador'];
@@ -1797,9 +1796,8 @@ const servidor = app.listen(PORT, () => {
     console.log(`🚀 Servidor CRM corriendo en: http://localhost:${PORT}`);
 });
 
-const apagarServidor = async (signal) => {
+const apagarServidor = (signal) => {
     console.log(`\n${signal} recibido. Cerrando servidor…`);
-    await cerrarNavegadorPdf();
     servidor.close(() => process.exit(0));
 };
 

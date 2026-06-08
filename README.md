@@ -18,7 +18,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Leads              | **Oportunidades** en el embudo (tabla `leads`): varias por empresa con el **mismo nombre** de cliente; en el Kanban se distinguen por etapa, estatus, folio activo y demás datos de la tarjeta. Canales (`lead_sources`), estatus (`lead_estatus`), **tipo de persona** opcional (`PM`, `PF`, `PFAE`), drag & drop, confirmación al avanzar de etapa, `lead_etapas_historial` y cancelación con motivo. **Un folio activo por lead** en tablero; **Cambiar cotización** en el modal sustituye el folio visible y libera los demás (`lead_id` NULL), salvo **folio congelado** (`bloquea_cotizacion`, estatus **cancelado** o **pendiente autorización**): sin vincular ni cambiar cotización en modal; **Replicar cotización** sigue permitido salvo folio **especial** (ver cotizador). Estatus **`pendiente_autorizacion`**: incluye en suma y vista predeterminada, no mueve en embudo; **supervisor** y **admin_empresa** de la empresa ven **Aceptar** / **Rechazar** en la tarjeta (rechazo → **cancelado**); el agente ve el estatus sin botones y puede editar datos del lead. |
 | Dashboard          | Resumen de leads, valor y cotizaciones por empresa (con filtro para rol `agente`). No visible para `agente_cotizador`. |
 | Directorio Maestro | Vista tabular tipo Excel (`/maestro-leads`): cruce leads ↔ cotización activa, estatus y agente. Filtro por rol vía `GET /api/reportes/maestro-leads` (query `empresa_id`, `usuario_id`, `role`). |
-| Cotizador          | Cálculo y folio secuencial (FL-001…). **Automotriz** / **Otro** (GPS y trámites solo en Automotriz). Parámetros §10 en BD para **réplica idéntica**. **Catálogo GPS** por empresa (proveedores → productos con precio IVA); selector en formulario y administración en cotizador (`AdminGpsCatalogoPanel` / `SelectorGpsPrecio`). **Cotización especial** (toggle junto a *Limpiar Campos*): sin límites de tasa/plazo/residual; solo obligatorios mínimos para guardar; marco visual en formulario; folios especiales con marco en historial, **sin replicar ni reasignar** a otro prospecto (vinculación **permanente** con confirmación la primera vez). **Agente** / **agente_cotizador**: al guardar en modo especial → prospecto `pendiente_autorizacion` (si hay lead), cotización `autorizacion_estado = pendiente`, correo SMTP a supervisores y admin de la empresa (con folio y enlace a `/leads`); **sin PDF** hasta autorizar. **Supervisor** / **admin_empresa**: sin correo; cotización aprobada y lead activo. **Guardar DB** abre modal: solo cotización, **nueva oportunidad** o **vincular a existente** (`ModalDestinoProspecto`; excluye oportunidades con folio congelado). El select del formulario lista **un nombre por persona** y solo **copia** nombre/tipo de persona; no vincula al guardar. **Réplica** sin nombre ni prospecto (no aplica a folios ya marcados como especiales). **Generar PDF** (Puppeteer: `POST /api/cotizaciones/pdf`, `GET /api/cotizaciones/:id/pdf`, con token) bloqueado en modo especial o mientras `autorizacion_estado = pendiente`. **Detalle** en `ModalDetalleCotizacion` / `PanelDetalleCotizacion`. API CRUD `/api/cotizaciones*` pública por producto; autorización especial y PDF con token. |
+| Cotizador          | Cálculo y folio secuencial (FL-001…). **Automotriz** / **Otro** (GPS y trámites solo en Automotriz). Parámetros §10 en BD para **réplica idéntica**. **Catálogo GPS** por empresa (proveedores → productos con precio IVA); selector en formulario y administración en cotizador (`AdminGpsCatalogoPanel` / `SelectorGpsPrecio`). **Cotización especial** (toggle junto a *Limpiar Campos*): sin límites de tasa/plazo/residual; solo obligatorios mínimos para guardar; marco visual en formulario; folios especiales con marco en historial, **sin replicar ni reasignar** a otro prospecto (vinculación **permanente** con confirmación la primera vez). **Agente** / **agente_cotizador**: al guardar en modo especial → prospecto `pendiente_autorizacion` (si hay lead), cotización `autorizacion_estado = pendiente`, correo SMTP a supervisores y admin de la empresa (con folio y enlace a `/leads`); **sin PDF** hasta autorizar. **Supervisor** / **admin_empresa**: sin correo; cotización aprobada y lead activo. **Guardar DB** abre modal: solo cotización, **nueva oportunidad** o **vincular a existente** (`ModalDestinoProspecto`; excluye oportunidades con folio congelado). El select del formulario lista **un nombre por persona** y solo **copia** nombre/tipo de persona; no vincula al guardar. **Réplica** sin nombre ni prospecto (no aplica a folios ya marcados como especiales). **Generar PDF** (pdfmake: `POST /api/cotizaciones/pdf`, `GET /api/cotizaciones/:id/pdf`, con token) bloqueado en modo especial o mientras `autorizacion_estado = pendiente`. **Detalle** en `ModalDetalleCotizacion` / `PanelDetalleCotizacion`. API CRUD `/api/cotizaciones*` pública por producto; autorización especial y PDF con token. |
 
 ---
 
@@ -37,7 +37,7 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 | Correo | nodemailer | ^8.0.6 | Integración SMTP del backend |
 | CORS | cors | ^2.8.6 | Orígenes permitidos desde `CORS_ORIGINS` (lista separada por comas) |
 | Firebase Admin | firebase-admin | ^13.8.0 | Verificación de `idToken` y gestión de usuarios en Auth |
-| PDF | puppeteer | ^25.1.0 | Render HTML → PDF de cotizaciones (Chrome empaquetado o del sistema) |
+| PDF | pdfmake | ^0.3.10 | Generación de PDF de cotizaciones en servidor (sin navegador headless) |
 
 ### Frontend
 
@@ -77,9 +77,9 @@ CRM es el sistema interno para operar el pipeline comercial de forma multiempres
 └──────────────┬──────────────────────────────┬─────────────────┘
                │ mysql2 pool (db.js)            │ Firebase Admin (firebase.js + credencial)
                │                                │ nodemailer (SMTP)
-               │                                │ Puppeteer → PDF (lib/generar-pdf-cotizacion.js)
+               │                                │ pdfmake → PDF (lib/generar-pdf-cotizacion.js)
 ┌──────────────▼──────────────┐    ┌────────────▼──────────────┐
-│  MariaDB/MySQL (flising_crm) │    │  Firebase Auth / SMTP / Chrome │
+│  MariaDB/MySQL (flising_crm) │    │  Firebase Auth / SMTP        │
 └────────────────────────────┘    └───────────────────────────┘
 ```
 
@@ -112,8 +112,7 @@ CRM/
 │   ├── lead-etapas-historial.js
 │   ├── leads.js
 │   ├── pdf-cotizacion-assets.js
-│   ├── pdf-cotizacion-html.js
-│   ├── puppeteer-config.js
+│   ├── pdf-cotizacion-documento.js
 │   └── reporteMaestro.js            # Router Express: /api/reportes/maestro-leads
 ├── eslint.config.mjs
 ├── firebase.js
@@ -188,7 +187,6 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 - Node.js y npm instalados (versiones acordadas con el equipo).
 - Servidor MySQL o MariaDB.
 - Proyecto Firebase (Auth habilitado, aplicación web, cuenta de servicio para Admin SDK).
-- **Chrome o Chromium** para generar PDFs con Puppeteer (el `postinstall` del backend intenta descargar Chrome; alternativa: Chrome del sistema y `PUPPETEER_EXECUTABLE_PATH` en `.env`).
 - SMTP (`EMAIL_*` en `.env`) para correo de bienvenida de usuarios y **solicitud de cotización especial** (un correo por folio guardado por agente; requiere `FRONTEND_BASE_URL` para el enlace al CRM).
 
 ---
@@ -197,13 +195,9 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 
 1. Clonar el repositorio y entrar al directorio del proyecto.
 
-2. Instalar dependencias del backend (incluye `postinstall` de Puppeteer para Chrome):
+2. Instalar dependencias del backend:
    ```bash
    npm install
-   ```
-   Si falla la generación de PDF, instalar Chrome explícitamente:
-   ```bash
-   npm run pdf:install-chrome
    ```
 
 3. Colocar la cuenta de servicio de Firebase en `firebase-key.json` (raíz).
@@ -259,7 +253,6 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 | `EMAIL_PASS` | Contraseña SMTP |
 | `CORS_ORIGINS` | Orígenes del navegador autorizados para llamar a la API, separados por comas. Si está vacía o ausente, no se admite ningún origen en peticiones cross-origin. |
 | `FRONTEND_BASE_URL` | Base del frontend para enlaces absolutos (p. ej. `http://localhost:5173`). Usada en el correo de **cotización especial** (`/leads`). Otros flujos (bienvenida de usuario) pueden seguir URLs fijas en código (ver Deuda técnica). |
-| `PUPPETEER_EXECUTABLE_PATH` | (Opcional) Ruta al binario de Chrome/Chromium si no se usa el descargado por Puppeteer. |
 
 ### Frontend (`frontend/.env`)
 
@@ -602,9 +595,9 @@ Sin `verificarToken`. Cualquier cliente que conozca la URL puede crear o leer co
 
 **Generación de PDF (servidor):**
 
-- HTML en `lib/pdf-cotizacion-html.js`; imágenes y logo en `lib/pdf-cotizacion-assets.js` (lee `assets/`).
+- Definición del documento en `lib/pdf-cotizacion-documento.js` (pdfmake); imágenes y logo en `lib/pdf-cotizacion-assets.js` (lee `assets/`).
 - Cálculo alineado con el formulario en `lib/cotizacion-calculo.js` y validación en `lib/cotizacion-formulario-pdf.js`.
-- Orquestación: `lib/generar-pdf-cotizacion.js` + `lib/puppeteer-config.js`.
+- Orquestación: `lib/generar-pdf-cotizacion.js`.
 - Nombre de archivo: `FL{folio}_{NombreCliente}.pdf` (misma convención en `frontend/src/lib/generarPdfCotizacion.js`).
 - **Frontend:** `descargarPdfPreview` (cotizador sin guardar), `descargarPdfPorCotizacionId` / `generarPdfDesdeCotizacion` (historial, leads, modal detalle).
 
@@ -747,7 +740,7 @@ export const AVISO_PREVIO_MS = 30 * 1000;
 | Rutas públicas sensibles | `GET /api/leads/:empresa_id` y `GET /api/reportes/maestro-leads` no usan `verificarToken`; el reporte confía en `role`/`usuario_id` por query string (suplantación posible). |
 | Sesión por inactividad | El timeout de 20 minutos y la pestaña única se aplican solo en el frontend; la API no invalida tokens por idle. Si se requiere enforcement en servidor, haría falta registro de última actividad por usuario. |
 | Arquitectura backend | Toda la API en `index.js` sin capas separadas (rutas/controladores/servicios); reporte maestro en router aparte (`lib/reporteMaestro.js`). |
-| PDF / despliegue | Puppeteer requiere Chrome en el servidor; aumenta tamaño de despliegue y memoria del proceso Node. |
+| PDF / assets | Los PNG de logo y activos viven en `assets/` (no versionados); sin ellos el PDF se genera sin imágenes. |
 | CORS | Lista híbrida en código (`flow.flising.cloud`, localhost) más `CORS_ORIGINS`; conviene unificar en configuración por entorno. |
 | Calidad | ESLint con múltiples errores en `frontend/` y en `index.js`. |
 | Calidad | Sin tests automatizados en scripts del repo. |
@@ -761,7 +754,7 @@ export const AVISO_PREVIO_MS = 30 * 1000;
 
 - Proteger `GET /api/leads/:empresa_id` y `/api/reportes/maestro-leads` con `verificarToken` y filtros derivados de `req.usuarioCRM` (eliminar confianza en query `role`).
 - Valorar custom claims de Firebase si conviene reducir la consulta de perfil que hace `verificarToken` (hoy 1 query/request).
-- Introducir pipeline de CI/CD; incluir `db/migrations/schema-v2.sql` en el despliegue de BD existentes y `npm run pdf:install-chrome` (o imagen Docker con Chromium) en el servidor.
+- Introducir pipeline de CI/CD; incluir `db/migrations/schema-v2.sql` en el despliegue de BD existentes.
 - Modularizar el backend (rutas, controladores, servicios); extraer bloque cotizador y GPS a módulos.
 - Dejar ESLint sin errores y mantener reglas en CI.
 - Añadir pruebas automatizadas (cálculo en `lib/cotizacion-calculo.js`, PDF smoke) y pipeline mínimo de integración continua.
