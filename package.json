@@ -4,9 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "npx puppeteer browsers install chrome",
-    "pdf:install-chrome": "npx puppeteer browsers install chrome"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -20,7 +18,7 @@
     "firebase-admin": "^13.8.0",
     "mysql2": "^3.22.1",
     "nodemailer": "^8.0.6",
-    "puppeteer": "^25.1.0"
+    "pdfmake": "^0.3.10"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
