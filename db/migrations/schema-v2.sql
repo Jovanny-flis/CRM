@@ -245,6 +245,27 @@ WHERE NOT EXISTS (
   WHERE le.`empresa_id` = e.`id` AND le.`codigo` = 'cancelado'
 );
 
+INSERT INTO `lead_estatus` (
+  `id`, `empresa_id`, `codigo`, `nombre`, `color_hex`,
+  `incluir_en_suma`, `permite_mover`, `bloquea_cotizacion`, `es_sistema`, `orden`
+)
+SELECT UUID(), e.`id`, 'pendiente_autorizacion', 'Pendiente autorización', '#f59e0b', 1, 0, 1, 1, 500
+FROM `empresas` e
+WHERE NOT EXISTS (
+  SELECT 1 FROM `lead_estatus` le
+  WHERE le.`empresa_id` = e.`id` AND le.`codigo` = 'pendiente_autorizacion'
+);
+
+UPDATE `lead_estatus`
+SET
+  `es_sistema` = 1,
+  `incluir_en_suma` = 1,
+  `permite_mover` = 0,
+  `bloquea_cotizacion` = 1,
+  `color_hex` = '#f59e0b',
+  `orden` = 500
+WHERE `codigo` = 'pendiente_autorizacion';
+
 UPDATE `leads` l
 INNER JOIN `lead_estatus` ea ON ea.`empresa_id` = l.`empresa_id` AND ea.`codigo` = 'activo'
 INNER JOIN `lead_estatus` ec ON ec.`empresa_id` = l.`empresa_id` AND ec.`codigo` = 'cancelado'

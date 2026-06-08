@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import api from '../api';
 import PanelDetalleCotizacion from './PanelDetalleCotizacion';
@@ -70,16 +71,16 @@ function ModalDetalleCotizacion({
     ?? cotizacion?.lead_nombre
     ?? null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-detalle-cotizacion-titulo"
       onClick={onCerrar}
     >
       <div
-        className="w-full max-w-2xl max-h-[92vh] flex flex-col relative"
+        className="w-full max-w-2xl max-h-[92vh] flex flex-col relative min-h-0"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -108,7 +109,7 @@ function ModalDetalleCotizacion({
         )}
 
         {!cargando && !error && cotizacion && (
-          <div className="flex flex-col gap-3 min-h-0 max-h-[92vh]">
+          <div className="flex flex-col gap-3 min-h-0 max-h-[92vh] overflow-y-auto">
             {esCotizacionEspecial(cotizacion) && (
               <AvisoCotizacionParametrosEspeciales className="shrink-0" />
             )}
@@ -123,7 +124,8 @@ function ModalDetalleCotizacion({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

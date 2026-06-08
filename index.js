@@ -20,11 +20,13 @@ const { sembrarCanalesDefaultEmpresa } = require('./lib/canales');
 const {
     CODIGO_ACTIVO,
     CODIGO_CANCELADO,
+    CODIGO_PENDIENTE_AUTORIZACION,
     ORDEN_CANCELADO,
     asegurarCatalogoEstatus,
     obtenerEstatusInicial,
     listarEstatusEmpresa,
     esCancelado,
+    esEstatusSistema,
 } = require('./lib/estatus-leads');
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
 const { normalizarTipoPersona } = require('./lib/leads');
@@ -573,8 +575,8 @@ app.post('/api/estatus-leads',
             const codigo = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
             const [rango] = await db.query(
                 `SELECT COALESCE(MAX(orden), 0) AS max_orden FROM lead_estatus
-                 WHERE empresa_id = ? AND codigo NOT IN (?, ?)`,
-                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO],
+                 WHERE empresa_id = ? AND codigo NOT IN (?, ?, ?)`,
+                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO, CODIGO_PENDIENTE_AUTORIZACION],
             );
             const orden = Math.min((rango[0]?.max_orden || 0) + 1, ORDEN_CANCELADO - 1);
             const id = crypto.randomUUID();
@@ -624,7 +626,7 @@ app.put('/api/estatus-leads/:id',
             const fila = actual[0];
             const color = color_hex === '' || color_hex === 'sin_color' ? null : (color_hex ?? fila.color_hex);
 
-            if (fila.codigo === CODIGO_CANCELADO) {
+            if (fila.codigo === CODIGO_CANCELADO || fila.codigo === CODIGO_PENDIENTE_AUTORIZACION) {
                 await db.query('UPDATE lead_estatus SET nombre = ? WHERE id = ?', [nombreLimpio, id]);
                 return res.status(200).json({ mensaje: 'Estatus actualizado' });
             }
@@ -708,7 +710,7 @@ app.delete('/api/estatus-leads/:id',
         try {
             const [actual] = await db.query('SELECT * FROM lead_estatus WHERE id = ? LIMIT 1', [id]);
             if (!actual.length) return res.status(404).json({ error: 'Estatus no encontrado.' });
-            if (actual[0].es_sistema) {
+            if (esEstatusSistema(actual[0])) {
                 return res.status(400).json({ error: 'No se pueden eliminar los estatus del sistema.' });
             }
 

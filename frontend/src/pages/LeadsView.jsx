@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
@@ -869,8 +870,8 @@ function LeadsView() {
       </div>
 
       {/* MODAL DE CONFIRMACIÓN DE MOVIMIENTO */}
-      {confirmacionMovimiento && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      {confirmacionMovimiento && createPortal(
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 border border-slate-100">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
               El lead #{confirmacionMovimiento.idCorto} se moverá de{' '}
@@ -895,14 +896,15 @@ function LeadsView() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL PRINCIPAL: CREAR/EDITAR LEAD Y VER COTIZACIÓN */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-100 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
-            <div className="p-8">
+      {isModalOpen && createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-100 max-h-[92vh] flex flex-col min-h-0 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
+            <div className="p-8 overflow-y-auto flex-1 min-h-0">
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
                   {modoSoloLectura && <Eye className="text-slate-400" size={24} />}
@@ -1303,7 +1305,8 @@ function LeadsView() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <ModalDetalleCotizacion
@@ -1316,8 +1319,8 @@ function LeadsView() {
         generandoPdf={generandoPdf}
       />
 
-      {mostrarAvisoCancelacion && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      {mostrarAvisoCancelacion && createPortal(
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
               Si guardas con estatus cancelado, este lead no podrá cambiar de estatus, de etapa, ni editarse de nuevo. Tampoco se podrá vincular ni cambiar su cotización.
@@ -1330,7 +1333,8 @@ function LeadsView() {
               OK
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
