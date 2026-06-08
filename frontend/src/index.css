@@ -34,3 +34,15 @@
 .cotizacion-especial-marco-historial:hover > td {
   --marco-relleno: #f8fafc;
 }
+
+/* Oculta flechitas en inputs type="number" (cotizador y similares). */
+.input-sin-spinners::-webkit-outer-spin-button,
+.input-sin-spinners::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.input-sin-spinners {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
