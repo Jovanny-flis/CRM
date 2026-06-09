@@ -5,6 +5,7 @@ import { MoreVertical, Plus, Search } from 'lucide-react';
 import api from '../api';
 import ModalDestinoProspecto from '../components/ModalDestinoProspecto';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
+import ModalSelectorPdfUnidades from '../components/ModalSelectorPdfUnidades';
 import AdminGpsCatalogoPanel from '../components/AdminGpsCatalogoPanel';
 import SelectorGpsPrecio from '../components/SelectorGpsPrecio';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
@@ -25,7 +26,9 @@ import {
   crearLeadOportunidad,
   leadsPorNombreUnico,
   vincularCotizacionActiva,
+  vincularCotizacionesAlLead,
 } from '../lib/destinoProspectoCotizacion';
+import { formatearFolio } from '../lib/cotizacionesLead';
 import { calcularErroresYResultados } from '../lib/cotizacionCalculo';
 import {
   claseFilaHistorialEspecial,
@@ -126,7 +129,7 @@ const CotizadorView = () => {
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [generandoPdf, setGenerandoPdf] = useState(false);
-  const [avisoPdfVivoAbierto, setAvisoPdfVivoAbierto] = useState(false);
+  const [selectorPdfUnidadesAbierto, setSelectorPdfUnidadesAbierto] = useState(false);
   const [generandoPdfDetalle, setGenerandoPdfDetalle] = useState(false);
 
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
@@ -360,16 +363,25 @@ const CotizadorView = () => {
       }));
 
       if (finalLeadId) {
-        await vincularCotizacionActiva(api, resCot.data.id, finalLeadId);
+        const ids = resCot.data?.ids || [resCot.data.id];
+        await vincularCotizacionesAlLead(api, ids, finalLeadId);
         if (formData.tipo_persona) {
           await sincronizarTipoPersonaLead(finalLeadId);
         }
         cargarLeads();
       }
 
+      const cantidad = resCot.data?.cantidad || 1;
+      const folios = (resCot.data?.folios || []).map((f) => formatearFolio(f)).filter(Boolean);
+      const resumenFolios = folios.length
+        ? `\n\n${folios.length > 1 ? 'Folios' : 'Folio'}: ${folios.join(', ')}`
+        : '';
       const avisoMigracion = resCot.data?.aviso ? `\n\n⚠️ ${resCot.data.aviso}` : '';
       const avisoAuth = resCot.data?.aviso_autorizacion ? `\n\n${resCot.data.aviso_autorizacion}` : '';
-      alert(`✅ Cotización guardada con éxito.${avisoMigracion}${avisoAuth}`);
+      const mensajeBase = cantidad > 1
+        ? `✅ Se guardaron ${cantidad} cotizaciones con éxito.${resumenFolios}`
+        : `✅ Cotización guardada con éxito.${resumenFolios}`;
+      alert(`${mensajeBase}${avisoMigracion}${avisoAuth}`);
       setFolioOrigenReplicacion(null);
       setModoCotizacionEspecial(false);
       cargarHistorial();
@@ -460,20 +472,25 @@ const CotizadorView = () => {
     setModalDestino({ modo: 'guardar' });
   };
 
+  const numUnidadesFormulario = () =>
+    Math.max(1, parseInt(String(formData.numUnidades || '1'), 10) || 1);
+
   const solicitarPdfVivo = () => {
     if (!puedeGenerarPdf || generandoPdf) return;
     if (modoCotizacionEspecial) {
       alert('El PDF no está disponible en cotización especial hasta que sea autorizada.');
       return;
     }
-    setAvisoPdfVivoAbierto(true);
+    setSelectorPdfUnidadesAbierto(true);
   };
 
-  const ejecutarPdfVivo = async () => {
-    setAvisoPdfVivoAbierto(false);
+  const ejecutarPdfVivo = async (indicesUnidad) => {
+    setSelectorPdfUnidadesAbierto(false);
     setGenerandoPdf(true);
     try {
-      await descargarPdfPreview(formData);
+      for (const indice of indicesUnidad) {
+        await descargarPdfPreview(formData, { sufijoUnidad: indicesUnidad.length > 1 ? indice : null });
+      }
     } catch (error) {
       console.error('Error al generar PDF:', error);
       alert(error.message || 'No se pudo generar el PDF. Intenta de nuevo.');
@@ -589,6 +606,35 @@ const CotizadorView = () => {
               </select>
               <p className="text-[11px] text-slate-500 mt-1">
                 No vincula al guardar. Al pulsar Guardar DB elegirás nuevo lead, existente o solo cotización.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                Nº de unidades
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={formData.numUnidades}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    setFormData({ ...formData, numUnidades: '' });
+                    return;
+                  }
+                  const n = parseInt(raw, 10);
+                  if (Number.isFinite(n) && n >= 1) {
+                    setFormData({ ...formData, numUnidades: String(n) });
+                  }
+                }}
+                onWheel={evitarCambioPorScrollEnNumero}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                placeholder="1"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Cotizaciones idénticas que se darán de alta al guardar (cada una con su folio).
               </p>
             </div>
 
@@ -1269,43 +1315,13 @@ const CotizadorView = () => {
         generandoPdf={generandoPdfDetalle}
       />
 
-      {avisoPdfVivoAbierto && (
-        <div
-          className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="aviso-pdf-vivo-titulo"
-        >
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 border border-slate-100">
-            <h2
-              id="aviso-pdf-vivo-titulo"
-              className="text-slate-900 font-bold text-lg mb-3"
-            >
-              PDF sin folio
-            </h2>
-            <p className="text-slate-700 text-sm leading-relaxed">
-              Se generará un PDF <strong>sin folio</strong> y <strong>no se guardará</strong> en el historial.
-              Si deseas conservar la cotización con folio oficial, guarda primero desde el cotizador.
-            </p>
-            <div className="mt-6 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setAvisoPdfVivoAbierto(false)}
-                className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={ejecutarPdfVivo}
-                className="flex-1 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white transition-colors shadow-sm"
-              >
-                Generar PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ModalSelectorPdfUnidades
+        abierto={selectorPdfUnidadesAbierto}
+        cantidadUnidades={numUnidadesFormulario()}
+        generando={generandoPdf}
+        onCerrar={() => setSelectorPdfUnidadesAbierto(false)}
+        onGenerar={ejecutarPdfVivo}
+      />
 
       {confirmacionVinculoEspecial && (
         <div
@@ -1318,7 +1334,7 @@ const CotizadorView = () => {
             <p className="text-slate-700 text-sm leading-relaxed">
               La cotización especial{' '}
               <strong className="text-primary">{folioHistorialTexto(confirmacionVinculoEspecial.cotizacion.folio)}</strong>{' '}
-              quedará asignada de forma permanente al prospecto que elijas. No podrá vincularse a otro lead después.
+              quedará ligada al prospecto que elijas. Podrás desvincularla, pero no reasignarla a otro prospecto distinto.
               ¿Desea continuar?
             </p>
             <div className="mt-6 flex gap-3">
@@ -1382,10 +1398,10 @@ const CotizadorView = () => {
                   {confirmacionHistorialDestino.pasoInicial === 'elegir'
                     ? 'al nuevo prospecto que crees'
                     : 'al prospecto existente que selecciones'}
-                  . Si tenía otra vinculación previa, dejará de estar activa en ese prospecto.
+                  . Si pertenecía a otro prospecto, se desvinculará de ese prospecto.
                 </>
               )}
-              {' '}Solo puede haber un folio activo por lead. ¿Desea continuar?
+              {' '}¿Desea continuar?
             </p>
             <div className="mt-6 flex gap-3">
               <button

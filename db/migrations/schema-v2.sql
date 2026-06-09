@@ -408,5 +408,13 @@ CALL crm_add_column_if_missing('cotizaciones', 'autorizacion_estado',
   "VARCHAR(20) NULL DEFAULT NULL COMMENT 'pendiente | aprobada | rechazada; NULL si no aplica' AFTER `es_especial`");
 
 -- -----------------------------------------------------------------------------
+-- 14) Cotizaciones — lote (unidades múltiples) y origen especial
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('cotizaciones', 'lote_id',
+  "VARCHAR(36) NULL DEFAULT NULL COMMENT 'Agrupa cotizaciones creadas en el mismo guardado (N unidades)' AFTER `autorizacion_estado`");
+CALL crm_add_column_if_missing('cotizaciones', 'lead_id_origen_especial',
+  "VARCHAR(36) NULL DEFAULT NULL COMMENT 'Prospecto de nacimiento para cotizaciones especiales' AFTER `lote_id`");
+
+-- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)
 -- ----------------------------------------------------------------------------

@@ -36,5 +36,5 @@ export const claseMarcoCotizacionEspecial = () =>
 
 export const claseFilaHistorialEspecial = () => 'cotizacion-especial-marco-historial';
 
-/** Cotizaciones especiales no se replican ni reasignan (marco permanente en historial). */
-export const cotizacionEspecialBloqueaAccionesHistorial = (cot) => esCotizacionEspecial(cot);
+/** Bloquea reasignación a otro prospecto distinto al de origen (la API valida el detalle). */
+export const cotizacionEspecialBloqueaAccionesHistorial = () => false;

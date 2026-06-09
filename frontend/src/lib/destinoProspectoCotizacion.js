@@ -74,9 +74,21 @@ export const crearLeadOportunidad = async (api, {
   return id;
 };
 
-/** Deja un solo folio activo en el lead; libera los demás. */
+/** Vincula una cotización al prospecto (sin desvincular las demás). */
 export const vincularCotizacionActiva = async (api, cotizacionId, leadId) => {
   await api.put(`/cotizaciones/${cotizacionId}/vincular-lead`, { lead_id: leadId });
+};
+
+/** Vincula varias cotizaciones al mismo prospecto. */
+export const vincularCotizacionesAlLead = async (api, cotizacionIds, leadId) => {
+  for (const cotizacionId of cotizacionIds) {
+    await vincularCotizacionActiva(api, cotizacionId, leadId);
+  }
+};
+
+/** Desvincula una cotización del prospecto sin borrar el registro. */
+export const desvincularCotizacionDeLead = async (api, cotizacionId) => {
+  await api.put(`/cotizaciones/${cotizacionId}/desvincular-lead`);
 };
 
 const CODIGO_PENDIENTE_AUTORIZACION = 'pendiente_autorizacion';

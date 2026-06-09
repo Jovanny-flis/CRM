@@ -63,6 +63,7 @@ export const parseNumeroFormulario = (val) => {
 };
 
 export const formDataCotizadorVacio = () => ({
+  numUnidades: '1',
   lead_id: '',
   nombre_cliente: '',
   tipo_persona: '',
@@ -204,5 +205,6 @@ export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId
     renta_mensual_sin_iva: res.rentaMensualSubtotal,
     renta_mensual_con_iva: res.rentaMensualTotal,
     es_especial: esEspecial ? 1 : 0,
+    num_unidades: Math.max(1, parseInt(String(formData.numUnidades || '1'), 10) || 1),
   };
 };

@@ -92,7 +92,7 @@ export async function descargarPdfPorCotizacionId(
 }
 
 /** PDF en vivo desde el cotizador (sin folio; no persiste). */
-export async function descargarPdfPreview(formData, { modoCotizacionEspecial = false } = {}) {
+export async function descargarPdfPreview(formData, { modoCotizacionEspecial = false, sufijoUnidad = null } = {}) {
   try {
     const response = await api.post(
       '/cotizaciones/pdf',
@@ -103,10 +103,13 @@ export async function descargarPdfPreview(formData, { modoCotizacionEspecial = f
       },
       { responseType: 'blob' },
     );
-    const nombre = resolverNombreArchivoPdf(response.headers['content-disposition'], {
+    let nombre = resolverNombreArchivoPdf(response.headers['content-disposition'], {
       folio: null,
       nombreProspecto: formData.nombre_cliente,
     });
+    if (sufijoUnidad != null) {
+      nombre = nombre.replace(/\.pdf$/i, `_U${sufijoUnidad}.pdf`);
+    }
     descargarBlobPdf(response.data, nombre);
   } catch (error) {
     throw await manejarErrorPdf(error);
