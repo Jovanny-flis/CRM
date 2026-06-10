@@ -1,3 +1,5 @@
+import { derivarPorcentajeYVr } from './cotizacionFormulario';
+
 /** Utilidades de folios y cotizaciones vinculadas a prospectos. */
 
 export const formatearFolio = (folio) => {
@@ -24,6 +26,7 @@ export const etiquetaFolioLead = (lead) => {
 /** Mapea fila de cotizaciones → campos usados en el panel del modal de lead. */
 export const cotizacionAPanelLead = (cot) => {
   if (!cot) return null;
+  const { porcentajeVr, vrCalculado } = derivarPorcentajeYVr(cot);
   return {
     cotizacion_id: cot.id,
     cotizacion_folio: cot.folio,
@@ -38,13 +41,23 @@ export const cotizacionAPanelLead = (cot) => {
     cotizacion_enganche: cot.pago_inicial,
     cotizacion_renta: cot.renta_mensual_con_iva,
     cotizacion_renta_sin_iva: cot.renta_mensual_sin_iva,
-    cotizacion_vr_calculado: cot.vr_calculado,
-    cotizacion_porcentaje_vr: cot.porcentaje_vr,
+    cotizacion_vr_calculado: vrCalculado,
+    cotizacion_porcentaje_vr: porcentajeVr,
     cotizacion_tipo_renta: cot.tipo_renta,
     cotizacion_es_especial: cot.es_especial,
     cotizacion_autorizacion_estado: cot.autorizacion_estado,
   };
 };
+
+/** Deriva porcentaje y VR para tarjetas del modal de lead (incluye datos resumidos del tablero). */
+export const derivarVrDesdeCamposLead = (lead) => derivarPorcentajeYVr({
+  valor_activo: lead?.cotizacion_valor_activo,
+  residual_valor: lead?.residual_valor,
+  is_residual_pct: lead?.is_residual_pct,
+  porcentaje_vr: lead?.cotizacion_porcentaje_vr,
+  vr_calculado: lead?.cotizacion_vr_calculado,
+  tasa_anual: lead?.tasa_anual,
+});
 
 export const combinarLeadConCotizacion = (lead, cot) => ({
   ...lead,

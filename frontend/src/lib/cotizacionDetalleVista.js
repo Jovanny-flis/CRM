@@ -1,5 +1,6 @@
 import {
   cotizacionAFormData,
+  derivarPorcentajeYVr,
   esArrendamientoAutomotriz,
 } from './cotizacionFormulario';
 
@@ -26,6 +27,12 @@ const valorConModoPct = (valor, esPct) => {
   const n = Number(valor);
   if (!Number.isFinite(n)) return '—';
   return esPct ? `${n}%` : formatoMonedaCotizacion(n);
+};
+
+const formatPorcentajeVr = (n) => {
+  if (!Number.isFinite(n)) return '—';
+  const redondeado = Math.round(n * 100) / 100;
+  return `${redondeado}%`;
 };
 
 const etiquetaModoSeguro = (cot) => {
@@ -59,6 +66,7 @@ export function construirFilasDetalleCotizacion(cot) {
   const automotriz = esArrendamientoAutomotriz(fd.tipoArrendamiento);
   const tieneParametros = cot.tasa_anual != null;
   const productoResumen = cot.nombre_activo || cot.tipo_activo || '—';
+  const { porcentajeVr, vrCalculado } = derivarPorcentajeYVr(cot);
 
   const grupoActivo = [
     { etiqueta: 'Tipo de arrendamiento', valor: fd.tipoArrendamiento, ancho: 'full' },
@@ -246,12 +254,12 @@ export function construirFilasDetalleCotizacion(cot) {
       filas: [
         {
           etiqueta: 'Porcentaje VR',
-          valor: valorOGuion(cot.porcentaje_vr, (n) => `${n}%`),
+          valor: valorOGuion(porcentajeVr, formatPorcentajeVr),
           destacado: false,
         },
         {
           etiqueta: 'VR calculado',
-          valor: valorOGuion(cot.vr_calculado, formatoMonedaCotizacion),
+          valor: valorOGuion(vrCalculado, formatoMonedaCotizacion),
           destacado: true,
         },
       ],

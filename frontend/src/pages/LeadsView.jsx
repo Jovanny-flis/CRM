@@ -18,6 +18,7 @@ import {
 } from '../lib/destinoProspectoCotizacion';
 import {
   combinarLeadConCotizacion,
+  derivarVrDesdeCamposLead,
   etiquetaFolioLead,
   formatearFolio,
 } from '../lib/cotizacionesLead';
@@ -219,6 +220,7 @@ function LeadsView() {
   const leadVistaCotizacion = leadEditando && cotizacionSeleccionada
     ? combinarLeadConCotizacion(leadEditando, cotizacionSeleccionada)
     : leadEditando;
+  const vrVistaLead = leadVistaCotizacion ? derivarVrDesdeCamposLead(leadVistaCotizacion) : null;
 
   const esLeadCancelado = (lead) => lead.estatus_codigo === CODIGO_CANCELADO;
   const esLeadMovible = (lead) => !esLeadCancelado(lead) && (lead.estatus_permite_mover === 1 || lead.estatus_permite_mover === true);
@@ -1303,10 +1305,10 @@ function LeadsView() {
                             </div>
                             <div>
                               <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">
-                                Valor Residual ({leadVistaCotizacion.cotizacion_porcentaje_vr || 0}%)
+                                Valor Residual ({Math.round((vrVistaLead?.porcentajeVr || 0) * 100) / 100}%)
                               </div>
                               <div className="font-bold text-sm text-slate-200">
-                                {formatoMoneda(leadVistaCotizacion.cotizacion_vr_calculado)}
+                                {formatoMoneda(vrVistaLead?.vrCalculado ?? leadVistaCotizacion.cotizacion_vr_calculado)}
                               </div>
                             </div>
                           </div>

@@ -154,8 +154,55 @@ export const cotizacionAFormData = (cot, { paraReplicar = false } = {}) => {
   };
 };
 
+/**
+ * Deriva porcentaje VR y monto VR a partir de parámetros guardados o totales persistidos.
+ * Si el residual se capturó en monto nominal, calcula el porcentaje equivalente.
+ */
+export const derivarPorcentajeYVr = (cot) => {
+  if (!cot) return { porcentajeVr: 0, vrCalculado: 0 };
+
+  const valorActivo = Number(cot.valor_activo);
+  const esPct = boolDesdeBd(cot.is_residual_pct, true);
+  let porcentajeVr = Number(cot.porcentaje_vr);
+  let vrCalculado = Number(cot.vr_calculado);
+
+  const tieneParametros = cot.tasa_anual != null && cot.residual_valor != null;
+
+  if (tieneParametros) {
+    const residualInput = Number(cot.residual_valor);
+    if (esPct) {
+      if (!Number.isFinite(porcentajeVr) || porcentajeVr === 0) porcentajeVr = residualInput;
+      if ((!Number.isFinite(vrCalculado) || vrCalculado === 0) && valorActivo > 0) {
+        vrCalculado = valorActivo * (residualInput / 100);
+      }
+    } else {
+      if (!Number.isFinite(vrCalculado) || vrCalculado === 0) vrCalculado = residualInput;
+      if ((!Number.isFinite(porcentajeVr) || porcentajeVr === 0) && valorActivo > 0) {
+        porcentajeVr = (residualInput / valorActivo) * 100;
+      }
+    }
+  } else if (
+    (!Number.isFinite(porcentajeVr) || porcentajeVr === 0)
+    && Number.isFinite(vrCalculado) && vrCalculado > 0
+    && valorActivo > 0
+  ) {
+    porcentajeVr = (vrCalculado / valorActivo) * 100;
+  }
+
+  return {
+    porcentajeVr: Number.isFinite(porcentajeVr) ? porcentajeVr : 0,
+    vrCalculado: Number.isFinite(vrCalculado) ? vrCalculado : 0,
+  };
+};
+
 /** Payload para POST /cotizaciones (totales calculados + parámetros del formulario). */
 export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId, leadId, esEspecial = false }) => {
+  const valorActivo = parseNumeroFormulario(formData.valorActivo);
+  const residualInput = parseNumeroFormulario(formData.residual);
+  const porcentajeVr = formData.isResidualPct
+    ? residualInput
+    : (valorActivo > 0 ? (residualInput / valorActivo) * 100 : 0);
+
   const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
     ? [formData.marca, formData.modelo, formData.version, formData.anio]
         .map((s) => String(s || '').trim())
@@ -199,7 +246,7 @@ export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId
       is_rentas_deposito: formData.isRentasDeposito ? 1 : 0,
     rentas_deposito_cantidad: parseInt(formData.rentasDepositoCantidad, 10) || 0,
     rentas_deposito_valor: res.rentasDepositoValor || 0,
-    porcentaje_vr: formData.isResidualPct ? parseNumeroFormulario(formData.residual) : 0,
+    porcentaje_vr: porcentajeVr,
     vr_calculado: res.residualReal,
     pago_inicial: res.pagoInicialTotal,
     renta_mensual_sin_iva: res.rentaMensualSubtotal,
