@@ -153,6 +153,7 @@ const CotizadorView = () => {
   const [modoCotizacionEspecial, setModoCotizacionEspecial] = useState(false);
   const [confirmacionVinculoEspecial, setConfirmacionVinculoEspecial] = useState(null);
   const [procesandoAutorizacion, setProcesandoAutorizacion] = useState(false);
+  const [leadIdOrigenProspecto, setLeadIdOrigenProspecto] = useState(null);
 
   const [res, setRes] = useState({});
   const [errores, setErrores] = useState({});
@@ -245,6 +246,22 @@ const CotizadorView = () => {
   }, [location.state?.replicarCotizacionId, empresaId, navigate]);
 
   useEffect(() => {
+    const origen = location.state?.desdeProspecto;
+    if (!origen?.nombre) return undefined;
+
+    setFormData((prev) => ({
+      ...prev,
+      nombre_cliente: origen.nombre,
+      tipo_persona: origen.tipo_persona || prev.tipo_persona,
+    }));
+    setReferenciaNombreClave(claveNombreLead(origen.nombre));
+    setLeadIdOrigenProspecto(origen.leadId || null);
+    navigate('/cotizador', { replace: true, state: {} });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return undefined;
+  }, [location.state?.desdeProspecto, navigate]);
+
+  useEffect(() => {
     if (!menuHistorialId) {
       setMenuHistorialPanelStyle(null);
       return undefined;
@@ -280,6 +297,7 @@ const CotizadorView = () => {
     setFormData(formDataCotizadorVacio());
     setFolioOrigenReplicacion(null);
     setReferenciaNombreClave('');
+    setLeadIdOrigenProspecto(null);
     setModoCotizacionEspecial(false);
   };
 
@@ -383,6 +401,7 @@ const CotizadorView = () => {
         : `✅ Cotización guardada con éxito.${resumenFolios}`;
       alert(`${mensajeBase}${avisoMigracion}${avisoAuth}`);
       setFolioOrigenReplicacion(null);
+      setLeadIdOrigenProspecto(null);
       setModoCotizacionEspecial(false);
       cargarHistorial();
     } catch (error) {
@@ -469,6 +488,10 @@ const CotizadorView = () => {
 
   const handleGuardarCotizacion = () => {
     if (!puedeGuardar || guardando) return;
+    if (leadIdOrigenProspecto) {
+      ejecutarGuardadoConDestino({ tipo: 'existente', leadId: leadIdOrigenProspecto });
+      return;
+    }
     setModalDestino({ modo: 'guardar' });
   };
 

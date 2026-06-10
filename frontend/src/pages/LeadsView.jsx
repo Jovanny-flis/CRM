@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
-import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
+import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye, Plus } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import ListaCotizacionesLead from '../components/ListaCotizacionesLead';
@@ -463,6 +463,26 @@ function LeadsView() {
     } finally {
       setBuscandoCotizaciones(false);
     }
+  };
+
+  const handleCrearNuevaCotizacion = () => {
+    if (!leadEditando || modoSoloLectura || bloqueaCotizacionEnModal()) return;
+
+    const nombre = String(formData.nombre || leadEditando.nombre || '').trim();
+    if (!nombre) {
+      alert('Indica el nombre del prospecto antes de crear la cotización.');
+      return;
+    }
+
+    navigate('/cotizador', {
+      state: {
+        desdeProspecto: {
+          leadId: leadEditando.id,
+          nombre,
+          tipo_persona: formData.tipo_persona || leadEditando.tipo_persona || '',
+        },
+      },
+    });
   };
 
   const asignarCotizacion = async (cotizacionId) => {
@@ -1376,6 +1396,17 @@ function LeadsView() {
                             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                               Vincular Cotización Libre
                             </label>
+                            <button
+                              type="button"
+                              onClick={handleCrearNuevaCotizacion}
+                              className="w-full mb-4 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0"
+                            >
+                              <Plus size={18} />
+                              Crear nueva cotización
+                            </button>
+                            <p className="text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                              o vincular una existente
+                            </p>
                             <div className="relative shrink-0">
                               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                               <input 
