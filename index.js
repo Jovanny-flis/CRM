@@ -1452,9 +1452,12 @@ transporter.verify().then(() => {
 // ==========================================
 
 // 1. Guardar una o más cotizaciones idénticas (N unidades)
-app.post('/api/cotizaciones', async (req, res) => {
+app.post('/api/cotizaciones', verificarToken, async (req, res) => {
     const esEspecialSolicitada = Boolean(req.body.es_especial);
     const datos = normalizarDatosCotizacion(req.body);
+    if (req.usuarioCRM && req.usuarioCRM.id) {
+        datos.usuario_id = req.usuarioCRM.id;
+    }
     const { lead_id } = datos;
     const numUnidades = Math.max(1, parseInt(req.body.num_unidades, 10) || 1);
     const loteId = numUnidades > 1 ? crypto.randomUUID() : null;
@@ -1664,10 +1667,17 @@ app.get(
                 return res.status(404).json({ error: 'Cotización no encontrada.' });
             }
 
-            const cot = filas[0];
+const cot = filas[0];
             const { rol, id: usuarioId } = req.usuarioCRM;
-            if ((rol === 'agente' || rol === 'agente_cotizador') && cot.usuario_id !== usuarioId) {
-                return res.status(403).json({ error: 'No tienes acceso a esta cotización.' });
+            
+            // EL CHISMOSO: Forzamos texto y quitamos espacios invisibles
+            const idBD = String(cot.usuario_id).trim();
+            const idToken = String(usuarioId).trim();
+
+            if ((rol === 'agente' || rol === 'agente_cotizador') && idBD !== idToken) {
+                return res.status(403).json({ 
+                    error: `No tienes acceso. BD dice: [${idBD}] pero Token dice: [${idToken}]` 
+                });
             }
             if (cotizacionEspecialBloqueaPdf(cot)) {
                 return res.status(403).json({
