@@ -40,6 +40,10 @@ const numeroAString = (v) => {
   return Number.isFinite(n) ? String(n) : String(v);
 };
 
+/**
+ * Formato de montos en el cotizador: punto = decimales, coma = miles (ej. 1,500.50).
+ * Solo dígitos y un punto; las comas de miles se reinsertan al formatear.
+ */
 export const formatMontoEnFormulario = (val) => {
   if (!val) return '';
   let rawValue = val.toString().replace(/[^0-9.]/g, '');
@@ -50,7 +54,16 @@ export const formatMontoEnFormulario = (val) => {
   return decimales !== undefined ? `${enterosFormateados}.${decimales}` : enterosFormateados;
 };
 
+/** Quita comas de miles y parsea; el punto es el único separador decimal. */
+export const parseNumeroFormulario = (val) => {
+  const s = String(val ?? '').trim().replace(/,/g, '');
+  if (!s) return 0;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export const formDataCotizadorVacio = () => ({
+  numUnidades: '1',
   lead_id: '',
   nombre_cliente: '',
   tipo_persona: '',
@@ -128,21 +141,68 @@ export const cotizacionAFormData = (cot, { paraReplicar = false } = {}) => {
     isResidualPct: boolDesdeBd(cot.is_residual_pct, true),
     comision: cot.comision_valor != null ? numeroAString(cot.comision_valor) : '',
     isComisionPct: boolDesdeBd(cot.is_comision_pct, true),
-    seguro: cot.seguro_valor != null ? numeroAString(cot.seguro_valor) : '',
+    seguro: cot.seguro_valor != null ? formatMontoEnFormulario(String(cot.seguro_valor)) : '',
     isSeguroContado: boolDesdeBd(cot.is_seguro_contado, true),
     isSeguroAnual: boolDesdeBd(cot.is_seguro_anual, true),
-    gps: automotriz && cot.gps_valor != null ? numeroAString(cot.gps_valor) : '',
+    gps: automotriz && cot.gps_valor != null ? formatMontoEnFormulario(String(cot.gps_valor)) : '',
     isGpsContado: boolDesdeBd(cot.is_gps_contado, true),
-    servicios: automotriz && cot.servicios_valor != null ? numeroAString(cot.servicios_valor) : '',
+    servicios: automotriz && cot.servicios_valor != null
+      ? formatMontoEnFormulario(String(cot.servicios_valor))
+      : '',
     isRentasDeposito: boolDesdeBd(cot.is_rentas_deposito, false),
     rentasDepositoCantidad: cot.rentas_deposito_cantidad != null ? String(cot.rentas_deposito_cantidad) : '',
   };
 };
 
-const parseNumeroFormulario = (val) => parseFloat(String(val || '').replace(/,/g, '')) || 0;
+/**
+ * Deriva porcentaje VR y monto VR a partir de parámetros guardados o totales persistidos.
+ * Si el residual se capturó en monto nominal, calcula el porcentaje equivalente.
+ */
+export const derivarPorcentajeYVr = (cot) => {
+  if (!cot) return { porcentajeVr: 0, vrCalculado: 0 };
+
+  const valorActivo = Number(cot.valor_activo);
+  const esPct = boolDesdeBd(cot.is_residual_pct, true);
+  let porcentajeVr = Number(cot.porcentaje_vr);
+  let vrCalculado = Number(cot.vr_calculado);
+
+  const tieneParametros = cot.tasa_anual != null && cot.residual_valor != null;
+
+  if (tieneParametros) {
+    const residualInput = Number(cot.residual_valor);
+    if (esPct) {
+      if (!Number.isFinite(porcentajeVr) || porcentajeVr === 0) porcentajeVr = residualInput;
+      if ((!Number.isFinite(vrCalculado) || vrCalculado === 0) && valorActivo > 0) {
+        vrCalculado = valorActivo * (residualInput / 100);
+      }
+    } else {
+      if (!Number.isFinite(vrCalculado) || vrCalculado === 0) vrCalculado = residualInput;
+      if ((!Number.isFinite(porcentajeVr) || porcentajeVr === 0) && valorActivo > 0) {
+        porcentajeVr = (residualInput / valorActivo) * 100;
+      }
+    }
+  } else if (
+    (!Number.isFinite(porcentajeVr) || porcentajeVr === 0)
+    && Number.isFinite(vrCalculado) && vrCalculado > 0
+    && valorActivo > 0
+  ) {
+    porcentajeVr = (vrCalculado / valorActivo) * 100;
+  }
+
+  return {
+    porcentajeVr: Number.isFinite(porcentajeVr) ? porcentajeVr : 0,
+    vrCalculado: Number.isFinite(vrCalculado) ? vrCalculado : 0,
+  };
+};
 
 /** Payload para POST /cotizaciones (totales calculados + parámetros del formulario). */
-export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId, leadId }) => {
+export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId, leadId, esEspecial = false }) => {
+  const valorActivo = parseNumeroFormulario(formData.valorActivo);
+  const residualInput = parseNumeroFormulario(formData.residual);
+  const porcentajeVr = formData.isResidualPct
+    ? residualInput
+    : (valorActivo > 0 ? (residualInput / valorActivo) * 100 : 0);
+
   const nombreCombinado = formData.tipoArrendamiento === 'Automotriz'
     ? [formData.marca, formData.modelo, formData.version, formData.anio]
         .map((s) => String(s || '').trim())
@@ -186,10 +246,12 @@ export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId
       is_rentas_deposito: formData.isRentasDeposito ? 1 : 0,
     rentas_deposito_cantidad: parseInt(formData.rentasDepositoCantidad, 10) || 0,
     rentas_deposito_valor: res.rentasDepositoValor || 0,
-    porcentaje_vr: formData.isResidualPct ? parseNumeroFormulario(formData.residual) : 0,
+    porcentaje_vr: porcentajeVr,
     vr_calculado: res.residualReal,
     pago_inicial: res.pagoInicialTotal,
     renta_mensual_sin_iva: res.rentaMensualSubtotal,
     renta_mensual_con_iva: res.rentaMensualTotal,
+    es_especial: esEspecial ? 1 : 0,
+    num_unidades: Math.max(1, parseInt(String(formData.numUnidades || '1'), 10) || 1),
   };
 };

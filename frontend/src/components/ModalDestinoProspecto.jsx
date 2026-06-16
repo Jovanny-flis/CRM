@@ -139,7 +139,7 @@ const ModalDestinoProspecto = ({
             >
               Vincular a oportunidad existente
               <span className="block text-xs font-normal text-slate-500 mt-0.5">
-                Esta cotización será el folio activo de ese prospecto; los demás folios del mismo lead se liberan.
+                Se añadirá al prospecto sin desvincular las cotizaciones que ya tenga.
               </span>
             </button>
 

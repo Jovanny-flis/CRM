@@ -1,25 +1,53 @@
 import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
-import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye } from 'lucide-react';
+import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye, Plus } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
+import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
+import ListaCotizacionesLead from '../components/ListaCotizacionesLead';
+import {
+  AvisoCotizacionParametrosEspeciales,
+  BolitaCotizacionEspecial,
+} from '../components/CotizacionEspecialIndicadores';
 import { OPCIONES_TIPO_PERSONA } from '../constants/tipoPersona';
-import { estatusBloqueaCotizacion, leadBloqueaCotizacion } from '../lib/destinoProspectoCotizacion';
+import {
+  desvincularCotizacionDeLead,
+  estatusBloqueaCotizacion,
+  leadBloqueaCotizacion,
+} from '../lib/destinoProspectoCotizacion';
+import {
+  combinarLeadConCotizacion,
+  derivarVrDesdeCamposLead,
+  etiquetaFolioLead,
+  formatearFolio,
+} from '../lib/cotizacionesLead';
+import { descargarPdfPorCotizacionId } from '../lib/generarPdfCotizacion';
+import { formatMontoEnFormulario, parseNumeroFormulario } from '../lib/cotizacionFormulario';
+import {
+  cotizacionPendienteAutorizacion,
+  leadPendienteAutorizacion,
+  leadTieneCotizacionEspecial,
+  puedeAutorizarEspecial,
+} from '../lib/cotizacionEspecial';
 
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
 
 const valorEstimadoValido = (valor) => {
-  const n = parseFloat(valor);
-  return Number.isFinite(n) && n > 0;
+  const n = parseNumeroFormulario(valor);
+  return n > 0;
 };
 
-const valorMostrableLead = (lead) => {
-  if (lead.cotizacion_id && lead.cotizacion_valor_activo != null) {
-    return parseFloat(lead.cotizacion_valor_activo);
-  }
-  return parseFloat(lead.valor || 0);
+const formatearValorFormulario = (valor) => {
+  if (valor === null || valor === undefined || valor === '') return '';
+  return formatMontoEnFormulario(String(valor));
 };
+
+const valorMostrableLead = (lead) => parseFloat(lead.valor || 0);
+
+const leadTieneCotizacionesVinculadas = (lead) =>
+  Number(lead?.cotizaciones_cantidad ?? 0) > 0 || Boolean(lead?.cotizacion_id);
 
 function LeadsView() {
   const navigate = useNavigate();
@@ -40,6 +68,12 @@ function LeadsView() {
   const [sugerenciasCotizaciones, setSugerenciasCotizaciones] = useState([]);
   const [buscandoCotizaciones, setBuscandoCotizaciones] = useState(false);
   const [mostrarBuscadorCotizacion, setMostrarBuscadorCotizacion] = useState(false);
+  const [modalDetalleCotizacionAbierto, setModalDetalleCotizacionAbierto] = useState(false);
+  const [generandoPdf, setGenerandoPdf] = useState(false);
+  const [generandoPdfTodos, setGenerandoPdfTodos] = useState(false);
+  const [cotizacionesVinculadas, setCotizacionesVinculadas] = useState([]);
+  const [cotizacionSeleccionadaId, setCotizacionSeleccionadaId] = useState(null);
+  const [desvinculandoCotizacion, setDesvinculandoCotizacion] = useState(false);
   const buscadorRef = useRef(null);
   
   const [formData, setFormData] = useState({
@@ -66,6 +100,7 @@ function LeadsView() {
   const [mostrarAvisoCancelacion, setMostrarAvisoCancelacion] = useState(false);
   const [estatusOriginalCodigo, setEstatusOriginalCodigo] = useState('activo');
   const [confirmacionMovimiento, setConfirmacionMovimiento] = useState(null);
+  const [procesandoAutorizacion, setProcesandoAutorizacion] = useState(false);
 
   const fetchTablero = () => {
     if (!empresaId) {
@@ -154,7 +189,38 @@ function LeadsView() {
     setMostrarBuscadorCotizacion(false);
     setTerminoBusquedaCotizacion('');
     setSugerenciasCotizaciones([]);
+    setCotizacionesVinculadas([]);
+    setCotizacionSeleccionadaId(null);
   };
+
+  const cargarCotizacionesLead = async (leadId) => {
+    if (!leadId) {
+      setCotizacionesVinculadas([]);
+      setCotizacionSeleccionadaId(null);
+      return [];
+    }
+    try {
+      const res = await api.get(`/cotizaciones/lead/${leadId}`);
+      const lista = res.data || [];
+      setCotizacionesVinculadas(lista);
+      setCotizacionSeleccionadaId((prev) => {
+        if (prev && lista.some((c) => c.id === prev)) return prev;
+        return lista[0]?.id || null;
+      });
+      return lista;
+    } catch (error) {
+      console.error('Error al cargar cotizaciones del prospecto:', error);
+      setCotizacionesVinculadas([]);
+      setCotizacionSeleccionadaId(null);
+      return [];
+    }
+  };
+
+  const cotizacionSeleccionada = cotizacionesVinculadas.find((c) => c.id === cotizacionSeleccionadaId) || null;
+  const leadVistaCotizacion = leadEditando && cotizacionSeleccionada
+    ? combinarLeadConCotizacion(leadEditando, cotizacionSeleccionada)
+    : leadEditando;
+  const vrVistaLead = leadVistaCotizacion ? derivarVrDesdeCamposLead(leadVistaCotizacion) : null;
 
   const esLeadCancelado = (lead) => lead.estatus_codigo === CODIGO_CANCELADO;
   const esLeadMovible = (lead) => !esLeadCancelado(lead) && (lead.estatus_permite_mover === 1 || lead.estatus_permite_mover === true);
@@ -166,6 +232,90 @@ function LeadsView() {
     if (leadBloqueaCotizacion(leadEditando)) return true;
     const est = estatusList.find((e) => String(e.id) === String(formData.estatus_id));
     return estatusBloqueaCotizacion(est);
+  };
+
+  const ejecutarAutorizacionEspecialLead = async (cotizacionId, rechazar) => {
+    if (!cotizacionId || procesandoAutorizacion) return;
+    setProcesandoAutorizacion(true);
+    try {
+      const ruta = rechazar ? 'rechazar-especial' : 'autorizar-especial';
+      await api.post(`/cotizaciones/${cotizacionId}/${ruta}`);
+      alert(rechazar ? 'Cotización especial rechazada.' : 'Cotización especial autorizada.');
+      fetchTablero();
+    } catch (error) {
+      alert(error.response?.data?.error || error.message);
+    } finally {
+      setProcesandoAutorizacion(false);
+    }
+  };
+
+  const handleGenerarPdf = async () => {
+    if (!cotizacionSeleccionadaId || generandoPdf || !leadEditando) return;
+    if (cotizacionPendienteAutorizacion(cotizacionSeleccionada || leadVistaCotizacion)) {
+      alert('El PDF no está disponible hasta autorizar la cotización especial.');
+      return;
+    }
+    setGenerandoPdf(true);
+    try {
+      await descargarPdfPorCotizacionId(cotizacionSeleccionadaId, {
+        nombreProspecto: leadEditando.nombre,
+        folio: cotizacionSeleccionada?.folio,
+      });
+    } catch (error) {
+      console.error('Error al generar PDF:', error);
+      alert(error.message || 'No se pudo generar el PDF. Intenta de nuevo.');
+    } finally {
+      setGenerandoPdf(false);
+    }
+  };
+
+  const handleGenerarPdfTodos = async () => {
+    if (!cotizacionesVinculadas.length || generandoPdfTodos || !leadEditando) return;
+
+    const cantidad = cotizacionesVinculadas.length;
+    const pendientes = cotizacionesVinculadas.filter(cotizacionPendienteAutorizacion).length;
+    let mensaje = `Se descargarán ${cantidad} PDF (uno por cada folio vinculado).`;
+    if (pendientes > 0) {
+      mensaje += ` ${pendientes} cotización${pendientes === 1 ? '' : 'es'} pendiente${pendientes === 1 ? '' : 's'} de autorización se omitirá${pendientes === 1 ? '' : 'n'}.`;
+    }
+    mensaje += ' ¿Deseas continuar?';
+    if (!window.confirm(mensaje)) return;
+
+    setGenerandoPdfTodos(true);
+    try {
+      for (const cot of cotizacionesVinculadas) {
+        if (cotizacionPendienteAutorizacion(cot)) {
+          alert(`El PDF de ${formatearFolio(cot.folio)} no está disponible hasta autorizar la cotización especial.`);
+          continue;
+        }
+        await descargarPdfPorCotizacionId(cot.id, {
+          nombreProspecto: leadEditando.nombre,
+          folio: cot.folio,
+        });
+      }
+    } catch (error) {
+      console.error('Error al generar PDFs:', error);
+      alert(error.message || 'No se pudieron generar todos los PDF.');
+    } finally {
+      setGenerandoPdfTodos(false);
+    }
+  };
+
+  const handleDesvincularCotizacion = async () => {
+    if (!cotizacionSeleccionadaId || desvinculandoCotizacion || modoSoloLectura || bloqueaCotizacionEnModal()) return;
+    if (!window.confirm(`¿Desvincular ${formatearFolio(cotizacionSeleccionada?.folio)} de este prospecto?`)) return;
+
+    setDesvinculandoCotizacion(true);
+    try {
+      await desvincularCotizacionDeLead(api, cotizacionSeleccionadaId);
+      await cargarCotizacionesLead(leadEditando.id);
+      fetchTablero();
+      alert('Cotización desvinculada.');
+    } catch (error) {
+      alert(error.response?.data?.error || error.message);
+    } finally {
+      setDesvinculandoCotizacion(false);
+    }
   };
 
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
@@ -184,13 +334,16 @@ function LeadsView() {
 
   const cargarDatosAlModal = (leadCompleto) => {
     setLeadEditando(leadCompleto);
+    cargarCotizacionesLead(leadCompleto.id);
     setFormData({
       nombre: leadCompleto.nombre || '',
       correo: leadCompleto.correo || '',
       telefono: leadCompleto.telefono || '',
-      valor: leadCompleto.cotizacion_id
-        ? (leadCompleto.cotizacion_valor_activo ?? leadCompleto.valor ?? '')
-        : (leadCompleto.valor || ''),
+      valor: formatearValorFormulario(
+        leadTieneCotizacionesVinculadas(leadCompleto)
+          ? (leadCompleto.valor ?? '')
+          : (leadCompleto.valor || ''),
+      ),
       medio: leadCompleto.medio || '',
       tipo_persona: leadCompleto.tipo_persona || '',
       usuario_id: leadCompleto.usuario_id || '',
@@ -201,7 +354,7 @@ function LeadsView() {
     setMostrarAvisoCancelacion(false);
     setIsModalOpen(true);
     const congelaFolio = leadBloqueaCotizacion(leadCompleto);
-    setMostrarBuscadorCotizacion(!congelaFolio && !leadCompleto.cotizacion_id);
+    setMostrarBuscadorCotizacion(!congelaFolio && !leadTieneCotizacionesVinculadas(leadCompleto));
   };
 
   const handleCambioEstatus = (nuevoEstatusId) => {
@@ -276,6 +429,13 @@ function LeadsView() {
   };
 
   const estiloTarjetaLead = (lead) => {
+    if (leadPendienteAutorizacion(lead)) {
+      return {
+        backgroundColor: '#fffbeb',
+        borderColor: '#1e293b',
+        boxShadow: 'inset 0 0 0 2px #f59e0b',
+      };
+    }
     if (esLeadCancelado(lead)) {
       return { backgroundColor: '#f1f5f9', borderColor: '#cbd5e1' };
     }
@@ -305,16 +465,38 @@ function LeadsView() {
     }
   };
 
+  const handleCrearNuevaCotizacion = () => {
+    if (!leadEditando || modoSoloLectura || bloqueaCotizacionEnModal()) return;
+
+    const nombre = String(formData.nombre || leadEditando.nombre || '').trim();
+    if (!nombre) {
+      alert('Indica el nombre del prospecto antes de crear la cotización.');
+      return;
+    }
+
+    navigate('/cotizador', {
+      state: {
+        desdeProspecto: {
+          leadId: leadEditando.id,
+          nombre,
+          tipo_persona: formData.tipo_persona || leadEditando.tipo_persona || '',
+        },
+      },
+    });
+  };
+
   const asignarCotizacion = async (cotizacionId) => {
     if (modoSoloLectura || !leadEditando || !leadEditando.id || bloqueaCotizacionEnModal()) return;
-    
+
     try {
       await api.put(`/leads/${leadEditando.id}/vincular-cotizacion`, { cotizacion_id: cotizacionId });
-      alert("✅ Cotización asignada con éxito.");
+      await cargarCotizacionesLead(leadEditando.id);
+      setMostrarBuscadorCotizacion(false);
+      setTerminoBusquedaCotizacion('');
       fetchTablero();
-      cerrarModal(); 
+      alert('✅ Cotización vinculada al prospecto.');
     } catch (error) {
-      alert("❌ Error al asignar cotización: " + (error.response?.data?.error || error.message));
+      alert('❌ Error al vincular cotización: ' + (error.response?.data?.error || error.message));
     }
   };
 
@@ -322,10 +504,10 @@ function LeadsView() {
     e.preventDefault();
     if (modoSoloLectura) return;
 
-    const tieneCotizacion = Boolean(leadEditando?.cotizacion_id);
+    const tieneCotizacion = cotizacionesVinculadas.length > 0 || leadTieneCotizacionesVinculadas(leadEditando);
     const valorNumerico = tieneCotizacion
-      ? parseFloat(leadEditando.cotizacion_valor_activo ?? formData.valor)
-      : parseFloat(formData.valor);
+      ? parseFloat(leadEditando?.valor ?? parseNumeroFormulario(formData.valor))
+      : parseNumeroFormulario(formData.valor);
 
     if (!tieneCotizacion && !valorEstimadoValido(formData.valor)) {
       alert('El valor estimado es obligatorio y debe ser mayor a cero.');
@@ -490,7 +672,7 @@ function LeadsView() {
     <div className="font-sans w-full max-w-full min-w-0 pb-20">
       <header className="mb-8 w-full max-w-full min-w-0 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 shrink">
-          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Tablero de Leads</h1>
+          <h1 className="text-3xl font-extrabold text-primary tracking-tight">Tablero de Leads</h1>
           <p className="text-slate-500 mt-1">Gestión de prospectos por equipo</p>
         </div>
         
@@ -501,13 +683,13 @@ function LeadsView() {
               <button 
                 type="button"
                 onClick={() => setMenuAgentesAbierto(!menuAgentesAbierto)}
-                className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm transition-all hover:bg-slate-50"
+                className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 shadow-sm transition-all hover:bg-slate-50"
               >
                 <span className="flex items-center gap-2">
                   {filtroAgente === "" ? (
-                    <Users size={18} className="text-blue-500" />
+                    <Users size={18} className="text-primary" />
                   ) : (
-                    <User size={18} className="text-blue-500" />
+                    <User size={18} className="text-primary" />
                   )}
                   {filtroAgente === "" 
                     ? "Todos los agentes" 
@@ -528,14 +710,14 @@ function LeadsView() {
                       setMenuAgentesAbierto(false);
                     }}
                     className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
-                      filtroAgente === "" ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+                      filtroAgente === "" ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <Users size={18} className={filtroAgente === "" ? 'text-blue-600' : 'text-slate-400'} />
+                      <Users size={18} className={filtroAgente === "" ? 'text-primary' : 'text-slate-400'} />
                       Todos los agentes
                     </div>
-                    {filtroAgente === "" && <Check size={16} className="text-blue-600" />}
+                    {filtroAgente === "" && <Check size={16} className="text-primary" />}
                   </button>
 
                   {agentes.map(agente => {
@@ -549,14 +731,14 @@ function LeadsView() {
                           setMenuAgentesAbierto(false);
                         }}
                         className={`flex items-center justify-between w-full px-4 py-3 text-sm transition-colors ${
-                          esSeleccionado ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
+                          esSeleccionado ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50 font-medium'
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <User size={18} className={esSeleccionado ? 'text-blue-600' : 'text-slate-400'} />
+                          <User size={18} className={esSeleccionado ? 'text-primary' : 'text-slate-400'} />
                           {agente.nombre}
                         </div>
-                        {esSeleccionado && <Check size={16} className="text-blue-600" />}
+                        {esSeleccionado && <Check size={16} className="text-primary" />}
                       </button>
                     );
                   })}
@@ -569,7 +751,7 @@ function LeadsView() {
             <button
               type="button"
               onClick={() => setMenuEstatusAbierto(!menuEstatusAbierto)}
-              className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-blue-500 shadow-sm hover:bg-slate-50"
+              className="flex items-center justify-between w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-600 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 shadow-sm hover:bg-slate-50 transition-all"
             >
               <span>{etiquetaFiltroEstatus()}</span>
               <ChevronDown size={16} className={`text-slate-400 transition-transform ${menuEstatusAbierto ? 'rotate-180' : ''}`} />
@@ -580,7 +762,7 @@ function LeadsView() {
                   type="button"
                   onClick={seleccionarVistaPredeterminada}
                   className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                    modoFiltroEstatus === 'predeterminado' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                    modoFiltroEstatus === 'predeterminado' ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Vista predeterminada
@@ -590,7 +772,7 @@ function LeadsView() {
                   type="button"
                   onClick={seleccionarTodosLosEstatus}
                   className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                    modoFiltroEstatus === 'todos' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                    modoFiltroEstatus === 'todos' ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   Todos los estatus
@@ -604,7 +786,7 @@ function LeadsView() {
                       type="button"
                       onClick={() => toggleFiltroEstatus(est.id)}
                       className={`flex items-center justify-between w-full px-4 py-2.5 text-sm ${
-                        sel ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'
+                        sel ? 'bg-primary/10 text-primary font-bold' : 'text-slate-600 hover:bg-slate-50'
                       }`}
                     >
                       <span className="flex items-center gap-2">
@@ -625,7 +807,7 @@ function LeadsView() {
           <button 
             onClick={() => { setLeadEditando(null); setModoSoloLectura(false); setIsModalOpen(true); }}
             disabled={etapas.length === 0}
-            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 whitespace-nowrap ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'}`}
+            className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 whitespace-nowrap ${etapas.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-primary hover:brightness-95 text-white shadow-sm hover:shadow-md'}`}
           >
             <span className="text-xl">+</span> Nuevo Prospecto
           </button>
@@ -654,7 +836,7 @@ function LeadsView() {
               key={etapa.id} 
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, etapa.id)}
-              className="flex-shrink-0 w-80 bg-slate-200/40 rounded-2xl p-4 border border-slate-200/60 backdrop-blur-sm"
+              className="flex-shrink-0 w-80 bg-slate-50/80 rounded-2xl p-4 border border-slate-100"
             >
               <div className="mb-5 px-2">
                 <div className="flex justify-between items-center mb-2">
@@ -683,17 +865,17 @@ function LeadsView() {
                     onDragStart={movible ? (e) => handleDragStart(e, lead.id) : undefined}
                     onDragEnd={movible ? handleDragEnd : undefined}
                     style={estiloTarjetaLead(lead)}
-                    className={`p-4 rounded-xl shadow-sm border group relative overflow-hidden transition-shadow ${
+                    className={`p-4 rounded-xl shadow-sm border group relative overflow-hidden transition-all ${
                       movible
-                        ? 'hover:shadow-md cursor-grab active:cursor-grabbing'
+                        ? 'hover:shadow-md cursor-grab active:cursor-grabbing hover:border-primary/40'
                         : cancelado
                           ? 'opacity-75 grayscale cursor-default'
                           : 'opacity-90 cursor-default'
-                    } ${!lead.estatus_color && !cancelado ? 'bg-white border-slate-200 hover:border-blue-400' : ''}`}
+                    } ${!lead.estatus_color && !cancelado ? 'bg-white border-slate-200' : ''}`}
                   >
                     <div
                       className="absolute left-0 top-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity"
-                      style={{ backgroundColor: lead.estatus_color || (cancelado ? '#94a3b8' : (etapa.color_hex || '#3b82f6')) }}
+                      style={{ backgroundColor: lead.estatus_color || (cancelado ? '#94a3b8' : (etapa.color_hex || 'var(--empresa-color)')) }}
                     />
                     
                     {/* BOTONES DE ACCIÓN FLOTANTES: VER Y EDITAR */}
@@ -701,7 +883,7 @@ function LeadsView() {
                       <button 
                         type="button"
                         onClick={() => abrirModalVer(lead)}
-                        className="text-slate-400 hover:text-blue-500 bg-white/95 border border-slate-100 rounded-md p-1.5 shadow-sm transition-colors"
+                        className="text-slate-400 hover:text-primary bg-white/95 border border-slate-100 rounded-md p-1.5 shadow-sm transition-colors"
                         title="Ver Detalles"
                       >
                         <Eye size={14} />
@@ -721,9 +903,9 @@ function LeadsView() {
 
                     {/* BADGES ESQUINA SUPERIOR DERECHA: folio arriba, tipo persona, estatus abajo */}
                     <div className={`absolute top-3 right-3 flex flex-col items-end gap-1 z-10 pointer-events-none ${editable ? 'group-hover:opacity-0' : ''}`}>
-                      {lead.cotizacion_folio && (
+                      {etiquetaFolioLead(lead) && (
                         <span className="text-[9px] font-black tracking-wider px-2 py-0.5 rounded text-white bg-[#ea5533] shadow-sm">
-                          FL-{String(lead.cotizacion_folio).padStart(3, '0')}
+                          {etiquetaFolioLead(lead)}
                         </span>
                       )}
                       {lead.tipo_persona && (
@@ -758,9 +940,9 @@ function LeadsView() {
                     </div>
                     
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-medium max-w-[120px]">
-                          <User size={12} className="text-blue-500 shrink-0" />
+                          <User size={12} className="text-slate-400 shrink-0" />
                           <span className="truncate" title={lead.agente_nombre || 'Desconocido'}>
                             {lead.agente_nombre ? lead.agente_nombre.split(' ')[0] : 'Desconocido'}
                           </span>
@@ -769,7 +951,39 @@ function LeadsView() {
                           {lead.medio || MEDIO_DEFAULT}
                         </span>
                       </div>
+                      {leadTieneCotizacionEspecial(lead) && (
+                        <BolitaCotizacionEspecial className="shrink-0 ml-2" />
+                      )}
                     </div>
+
+                    {leadPendienteAutorizacion(lead) && lead.cotizacion_id && (
+                      <div className="mt-3 pt-3 border-t border-amber-200/80">
+                        {puedeAutorizarEspecial(usuarioLogueado) ? (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={procesandoAutorizacion}
+                              onClick={() => ejecutarAutorizacionEspecialLead(lead.cotizacion_id, false)}
+                              className="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-green-600 text-white hover:bg-green-500"
+                            >
+                              Aceptar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={procesandoAutorizacion}
+                              onClick={() => ejecutarAutorizacionEspecialLead(lead.cotizacion_id, true)}
+                              className="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-red-600 text-white hover:bg-red-500"
+                            >
+                              Rechazar
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wide text-center">
+                            Pendiente de autorización
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
                 })}
@@ -780,13 +994,13 @@ function LeadsView() {
       </div>
 
       {/* MODAL DE CONFIRMACIÓN DE MOVIMIENTO */}
-      {confirmacionMovimiento && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+      {confirmacionMovimiento && createPortal(
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 border border-slate-100">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
               El lead #{confirmacionMovimiento.idCorto} se moverá de{' '}
-              <span className="text-blue-700">{confirmacionMovimiento.etapaOrigen}</span> a{' '}
-              <span className="text-blue-700">{confirmacionMovimiento.etapaDestino}</span>{' '}
+              <span className="text-primary">{confirmacionMovimiento.etapaOrigen}</span> a{' '}
+              <span className="text-primary">{confirmacionMovimiento.etapaDestino}</span>{' '}
               y generará una etiqueta temporal en la base de datos. ¿Desea continuar?
             </p>
             <div className="mt-6 flex gap-3">
@@ -800,29 +1014,34 @@ function LeadsView() {
               <button
                 type="button"
                 onClick={confirmarMovimientoEtapa}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+                className="flex-1 px-4 py-3 bg-primary text-white font-bold rounded-xl hover:brightness-95 transition-colors shadow-sm"
               >
                 Continuar
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL PRINCIPAL: CREAR/EDITAR LEAD Y VER COTIZACIÓN */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
-            <div className="p-8">
+      {isModalOpen && createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-100 max-h-[92vh] flex flex-col min-h-0 ${leadEditando ? 'w-full max-w-5xl' : 'w-full max-w-lg'}`}>
+            <div className="p-8 overflow-y-auto flex-1 min-h-0">
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
                   {modoSoloLectura && <Eye className="text-slate-400" size={24} />}
                   {leadEditando ? (modoSoloLectura ? 'Detalles del Prospecto' : 'Editar Prospecto') : 'Nuevo Prospecto'}
                 </h2>
-                <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-100 rounded-full p-2">
+                <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-100 hover:bg-slate-200 rounded-full p-2">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
               </div>
+
+              {leadEditando && leadTieneCotizacionEspecial(leadEditando) && (
+                <AvisoCotizacionParametrosEspeciales className="mb-6" />
+              )}
 
               <div className={`grid grid-cols-1 ${leadEditando ? 'lg:grid-cols-2 gap-8' : ''}`}>
                 
@@ -836,7 +1055,7 @@ function LeadsView() {
                         value={formData.nombre} 
                         onChange={(e) => setFormData({...formData, nombre: e.target.value})} 
                         disabled={modoSoloLectura}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                         placeholder="Ej. Juan Pérez" 
                       />
                     </div>
@@ -847,7 +1066,7 @@ function LeadsView() {
                         value={formData.tipo_persona}
                         onChange={(e) => setFormData({ ...formData, tipo_persona: e.target.value })}
                         disabled={modoSoloLectura}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800 transition-all"
                       >
                         {OPCIONES_TIPO_PERSONA.map((op) => (
                           <option key={op.value || 'vacio'} value={op.value}>{op.label}</option>
@@ -863,7 +1082,7 @@ function LeadsView() {
                           value={formData.correo} 
                           onChange={(e) => setFormData({...formData, correo: e.target.value})} 
                           disabled={modoSoloLectura}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                           placeholder="juan@mail.com" 
                         />
                       </div>
@@ -874,7 +1093,7 @@ function LeadsView() {
                           value={formData.telefono} 
                           onChange={(e) => setFormData({...formData, telefono: e.target.value})} 
                           disabled={modoSoloLectura}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent" 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                           placeholder="5512345678" 
                         />
                       </div>
@@ -883,15 +1102,20 @@ function LeadsView() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>
-                          {leadEditando?.cotizacion_id ? 'Valor del activo (cotización)' : 'Valor Estimado ($) *'}
+                          {leadTieneCotizacionesVinculadas(leadEditando) ? 'Valor total (cotizaciones)' : 'Valor Estimado ($) *'}
                         </label>
                         <input 
-                          type="number" required min="0.01" step="0.01" 
+                          type="text"
+                          inputMode="decimal"
+                          required
                           value={formData.valor} 
-                          onChange={(e) => setFormData({...formData, valor: e.target.value})} 
-                          disabled={modoSoloLectura || Boolean(leadEditando?.cotizacion_id)}
-                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold ${modoSoloLectura || leadEditando?.cotizacion_id ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
-                          placeholder="Ej. 15000" 
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            valor: formatMontoEnFormulario(e.target.value),
+                          })} 
+                          disabled={modoSoloLectura || leadTieneCotizacionesVinculadas(leadEditando)}
+                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold transition-all ${modoSoloLectura || leadTieneCotizacionesVinculadas(leadEditando) ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
+                          placeholder="Ej. 350,000" 
                         />
                       </div>
                       <div className={modoSoloLectura ? "pointer-events-none opacity-80" : ""}>
@@ -915,7 +1139,7 @@ function LeadsView() {
                             value={formData.estatus_id}
                             onChange={(e) => handleCambioEstatus(e.target.value)}
                             disabled={modoSoloLectura}
-                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none transition-all"
                           >
                             {estatusList.map((est) => (
                               <option key={est.id} value={est.id}>
@@ -936,7 +1160,7 @@ function LeadsView() {
                               onChange={(e) => setMotivoDesactivacion(e.target.value)}
                               disabled={modoSoloLectura}
                               rows={3}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-sm disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all"
                               placeholder="Describe el motivo..."
                             />
                           </div>
@@ -951,7 +1175,7 @@ function LeadsView() {
                           value={formData.usuario_id} 
                           onChange={(e) => setFormData({...formData, usuario_id: e.target.value})} 
                           disabled={modoSoloLectura}
-                          className="w-full bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 focus:bg-white outline-none appearance-none font-medium text-blue-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 appearance-none font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all"
                         >
                           <option value="">Sin asignar</option>
                           {agentes.map(agente => (
@@ -965,7 +1189,7 @@ function LeadsView() {
 
                     {!modoSoloLectura && (
                       <div className="pt-6 flex gap-4">
-                        <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all text-lg">
+                        <button type="submit" className="w-full py-4 bg-primary text-white font-bold rounded-xl hover:brightness-95 shadow-sm transition-all text-lg">
                           {leadEditando ? '💾 Guardar Cambios' : 'Crear Prospecto'}
                         </button>
                       </div>
@@ -977,46 +1201,69 @@ function LeadsView() {
                 {leadEditando && (
                   <div className="flex flex-col h-full bg-slate-50 rounded-2xl p-6 border border-slate-200 relative">
                     
-                    <div className="flex justify-between items-center mb-6">
+                    <div className="flex justify-between items-start mb-4 gap-3">
                       <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
                         <FileText className="text-[#ea5533]" size={20} />
-                        Cotización Asignada
+                        Cotizaciones
+                        {cotizacionesVinculadas.length > 0 && (
+                          <span className="text-xs font-bold text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">
+                            {cotizacionesVinculadas.length}
+                          </span>
+                        )}
                       </h3>
-                      
-                      <div className="flex flex-wrap items-center gap-3 shrink-0">
-                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && (
+
+                      <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                        {cotizacionSeleccionadaId && !mostrarBuscadorCotizacion && (
                           <button
                             type="button"
-                            onClick={() => navigate('/cotizador', { state: { replicarCotizacionId: leadEditando.cotizacion_id } })}
-                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                            onClick={() => navigate('/cotizador', { state: { replicarCotizacionId: cotizacionSeleccionadaId } })}
+                            className="text-xs font-bold text-primary hover:brightness-75 underline"
                           >
-                            Replicar cotización
+                            Replicar
                           </button>
                         )}
-                        {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal() && (
+                        {!mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal() && (
                           <button
                             type="button"
                             onClick={() => setMostrarBuscadorCotizacion(true)}
-                            className="text-xs font-bold text-blue-600 hover:text-blue-700 underline"
+                            className="text-xs font-bold text-primary hover:brightness-75 underline"
                           >
-                            Cambiar Cotización
+                            Vincular otra
+                          </button>
+                        )}
+                        {cotizacionSeleccionadaId && !mostrarBuscadorCotizacion && !modoSoloLectura && !bloqueaCotizacionEnModal() && (
+                          <button
+                            type="button"
+                            onClick={handleDesvincularCotizacion}
+                            disabled={desvinculandoCotizacion}
+                            className="text-xs font-bold text-red-600 hover:text-red-700 underline disabled:opacity-50"
+                          >
+                            {desvinculandoCotizacion ? 'Desvinculando…' : 'Desvincular'}
                           </button>
                         )}
                       </div>
                     </div>
 
-                    {/* MOSTRAR DATOS SÚPER DETALLADOS DE LA COTIZACIÓN ACTUAL */}
-                    {leadEditando.cotizacion_id && !mostrarBuscadorCotizacion ? (
+                    {!mostrarBuscadorCotizacion && (
+                      <ListaCotizacionesLead
+                        cotizaciones={cotizacionesVinculadas}
+                        seleccionadaId={cotizacionSeleccionadaId}
+                        onSeleccionar={setCotizacionSeleccionadaId}
+                      />
+                    )}
+
+                    {/* Panel de la cotización seleccionada */}
+                    {cotizacionSeleccionadaId && leadVistaCotizacion && !mostrarBuscadorCotizacion ? (
                       <div className="bg-[#1e1e1e] text-white rounded-2xl p-6 shadow-xl border border-slate-800 relative overflow-hidden flex-1 flex flex-col">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-[#ea5533]/10 rounded-bl-full pointer-events-none"></div>
                         
                         <div className="flex justify-between items-start mb-6">
                           <div>
                             <span className="text-[10px] font-bold text-[#ea5533] uppercase tracking-widest">FOLIO</span>
-                            <div className="text-2xl font-black">FL-{String(leadEditando.cotizacion_folio).padStart(3, '0')}</div>
+                            <div className="text-2xl font-black">{formatearFolio(leadVistaCotizacion.cotizacion_folio)}</div>
                           </div>
                           <span className="bg-white/10 px-3 py-1 rounded-full text-xs font-medium border border-white/20 backdrop-blur-sm shadow-inner">
-                            {leadEditando.cotizacion_plazo} Meses
+                            {leadVistaCotizacion.cotizacion_plazo} Meses
                           </span>
                         </div>
 
@@ -1026,28 +1273,28 @@ function LeadsView() {
                           <div>
                             <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><Package size={14} /> Producto / Activo</div>
                             <div className="font-bold text-sm bg-black/40 p-3 rounded-xl border border-white/5 shadow-inner">
-                              {leadEditando.cotizacion_activo || leadEditando.cotizacion_tipo_activo || 'No especificado'}
+                              {leadVistaCotizacion.cotizacion_activo || leadVistaCotizacion.cotizacion_tipo_activo || 'No especificado'}
                             </div>
                           </div>
 
                           {/* Fila 2: Detalles Vehiculares (Si existen) */}
-                          {(leadEditando.cotizacion_marca || leadEditando.cotizacion_modelo || leadEditando.cotizacion_version || leadEditando.cotizacion_anio) && (
+                          {(leadVistaCotizacion.cotizacion_marca || leadVistaCotizacion.cotizacion_modelo || leadVistaCotizacion.cotizacion_version || leadVistaCotizacion.cotizacion_anio) && (
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Marca</div>
-                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_marca}>{leadEditando.cotizacion_marca || '-'}</div>
+                                <div className="font-bold text-xs truncate" title={leadVistaCotizacion.cotizacion_marca}>{leadVistaCotizacion.cotizacion_marca || '-'}</div>
                               </div>
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Modelo</div>
-                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_modelo}>{leadEditando.cotizacion_modelo || '-'}</div>
+                                <div className="font-bold text-xs truncate" title={leadVistaCotizacion.cotizacion_modelo}>{leadVistaCotizacion.cotizacion_modelo || '-'}</div>
                               </div>
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Versión</div>
-                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_version}>{leadEditando.cotizacion_version || '-'}</div>
+                                <div className="font-bold text-xs truncate" title={leadVistaCotizacion.cotizacion_version}>{leadVistaCotizacion.cotizacion_version || '-'}</div>
                               </div>
                               <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 text-center">
                                 <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Año</div>
-                                <div className="font-bold text-xs truncate" title={leadEditando.cotizacion_anio}>{leadEditando.cotizacion_anio || '-'}</div>
+                                <div className="font-bold text-xs truncate" title={leadVistaCotizacion.cotizacion_anio}>{leadVistaCotizacion.cotizacion_anio || '-'}</div>
                               </div>
                             </div>
                           )}
@@ -1056,14 +1303,14 @@ function LeadsView() {
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><Calendar size={14} /> Renta Mensual</div>
-                              <div className="font-bold text-lg text-blue-400">
-                                {formatoMoneda(leadEditando.cotizacion_renta)}
+                              <div className="font-bold text-lg text-primary">
+                                {formatoMoneda(leadVistaCotizacion.cotizacion_renta)}
                               </div>
                             </div>
                             <div>
                               <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5 mb-1"><DollarSign size={14} /> Pago Inicial</div>
                               <div className="font-bold text-lg text-green-400">
-                                {formatoMoneda(leadEditando.cotizacion_enganche)}
+                                {formatoMoneda(leadVistaCotizacion.cotizacion_enganche)}
                               </div>
                             </div>
                           </div>
@@ -1073,19 +1320,55 @@ function LeadsView() {
                             <div>
                               <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">Valor del bien</div>
                               <div className="font-bold text-sm text-slate-200">
-                                {formatoMoneda(leadEditando.cotizacion_valor_activo)}
+                                {formatoMoneda(leadVistaCotizacion.cotizacion_valor_activo)}
                               </div>
                             </div>
                             <div>
                               <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-0.5">
-                                Valor Residual ({leadEditando.cotizacion_porcentaje_vr || 0}%)
+                                Valor Residual ({Math.round((vrVistaLead?.porcentajeVr || 0) * 100) / 100}%)
                               </div>
                               <div className="font-bold text-sm text-slate-200">
-                                {formatoMoneda(leadEditando.cotizacion_vr_calculado)}
+                                {formatoMoneda(vrVistaLead?.vrCalculado ?? leadVistaCotizacion.cotizacion_vr_calculado)}
                               </div>
                             </div>
                           </div>
 
+                        </div>
+
+                        <div className="flex flex-wrap gap-3 mt-6 pt-4 border-t border-white/10 relative z-10">
+                          <button
+                            type="button"
+                            onClick={() => setModalDetalleCotizacionAbierto(true)}
+                            className="flex-1 min-w-[120px] py-2.5 px-4 rounded-xl text-sm font-bold bg-white/10 hover:bg-white/15 border border-white/20 transition-colors"
+                          >
+                            Detalles
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleGenerarPdf}
+                            disabled={generandoPdf || generandoPdfTodos}
+                            className={`flex-1 min-w-[100px] py-2.5 px-3 rounded-xl text-sm font-bold transition-colors ${
+                              generandoPdf || generandoPdfTodos
+                                ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                : 'bg-[#ea5533] hover:opacity-90 text-white'
+                            }`}
+                          >
+                            {generandoPdf ? 'PDF…' : 'PDF folio'}
+                          </button>
+                          {cotizacionesVinculadas.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={handleGenerarPdfTodos}
+                              disabled={generandoPdfTodos || generandoPdf}
+                              className={`flex-1 min-w-[100px] py-2.5 px-3 rounded-xl text-sm font-bold transition-colors ${
+                                generandoPdfTodos || generandoPdf
+                                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                  : 'bg-slate-700 hover:bg-slate-600 text-white'
+                              }`}
+                            >
+                              {generandoPdfTodos ? 'PDFs…' : 'PDF todos'}
+                            </button>
+                          )}
                         </div>
 
                         {bloqueaCotizacionEnModal() && (
@@ -1098,7 +1381,7 @@ function LeadsView() {
                       <div className="flex-1 flex flex-col items-center justify-center text-center opacity-70 px-4">
                         <FileText size={48} className="text-slate-400 mb-3" />
                         <p className="text-sm font-medium text-slate-600">
-                          {leadEditando.cotizacion_id
+                          {cotizacionSeleccionadaId
                             ? 'Este prospecto tiene el folio congelado en su estatus actual.'
                             : 'Este prospecto no puede recibir cotización: el folio está congelado en su estatus.'}
                         </p>
@@ -1113,6 +1396,17 @@ function LeadsView() {
                             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                               Vincular Cotización Libre
                             </label>
+                            <button
+                              type="button"
+                              onClick={handleCrearNuevaCotizacion}
+                              className="w-full mb-4 py-3 px-4 rounded-xl text-sm font-bold bg-[#ea5533] hover:opacity-90 text-white shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0"
+                            >
+                              <Plus size={18} />
+                              Crear nueva cotización
+                            </button>
+                            <p className="text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                              o vincular una existente
+                            </p>
                             <div className="relative shrink-0">
                               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                               <input 
@@ -1147,7 +1441,7 @@ function LeadsView() {
                                         </div>
                                       </div>
                                       <div className="text-right">
-                                        <div className="font-bold text-blue-600 text-sm">{formatoMoneda(cot.renta_mensual_con_iva)}</div>
+                                        <div className="font-bold text-primary text-sm">{formatoMoneda(cot.renta_mensual_con_iva)}</div>
                                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mt-0.5">Mensual</div>
                                       </div>
                                     </button>
@@ -1165,7 +1459,7 @@ function LeadsView() {
                         ) : null}
 
                         {/* ESTADO VACÍO CUANDO ES SOLO LECTURA */}
-                        {modoSoloLectura && !leadEditando.cotizacion_id && (
+                        {modoSoloLectura && !cotizacionSeleccionadaId && (
                            <div className="mt-12 text-center opacity-60 flex flex-col items-center">
                               <FileText size={48} className="text-slate-400 mb-3" />
                               <p className="text-sm font-medium text-slate-600">Este prospecto no tiene <br/>ninguna cotización vinculada.</p>
@@ -1173,12 +1467,13 @@ function LeadsView() {
                         )}
                         
                         {/* BOTÓN CANCELAR BÚSQUEDA */}
-                        {leadEditando.cotizacion_id && !modoSoloLectura && (
-                          <button 
+                        {mostrarBuscadorCotizacion && !modoSoloLectura && (
+                          <button
+                            type="button"
                             onClick={() => setMostrarBuscadorCotizacion(false)}
                             className="mt-4 px-4 py-3 text-slate-500 font-bold hover:text-slate-700 text-sm shrink-0"
                           >
-                            Cancelar cambio
+                            Cancelar búsqueda
                           </button>
                         )}
                       </div>
@@ -1188,11 +1483,22 @@ function LeadsView() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {mostrarAvisoCancelacion && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      <ModalDetalleCotizacion
+        abierto={modalDetalleCotizacionAbierto && Boolean(cotizacionSeleccionadaId)}
+        onCerrar={() => setModalDetalleCotizacionAbierto(false)}
+        cotizacionId={cotizacionSeleccionadaId}
+        prospectoNombre={leadEditando?.nombre}
+        agenteNombre={leadEditando?.agente_nombre}
+        onGenerarPdf={handleGenerarPdf}
+        generandoPdf={generandoPdf}
+      />
+
+      {mostrarAvisoCancelacion && createPortal(
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
             <p className="text-slate-800 font-semibold text-lg leading-relaxed">
               Si guardas con estatus cancelado, este lead no podrá cambiar de estatus, de etapa, ni editarse de nuevo. Tampoco se podrá vincular ni cambiar su cotización.
@@ -1200,12 +1506,13 @@ function LeadsView() {
             <button
               type="button"
               onClick={confirmarAvisoCancelacion}
-              className="mt-6 w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+              className="mt-6 w-full px-4 py-3 bg-primary text-white font-bold rounded-xl hover:brightness-95 transition-colors"
             >
               OK
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

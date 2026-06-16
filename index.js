@@ -20,18 +20,44 @@ const { sembrarCanalesDefaultEmpresa } = require('./lib/canales');
 const {
     CODIGO_ACTIVO,
     CODIGO_CANCELADO,
+    CODIGO_PENDIENTE_AUTORIZACION,
     ORDEN_CANCELADO,
     asegurarCatalogoEstatus,
     obtenerEstatusInicial,
     listarEstatusEmpresa,
     esCancelado,
+    esEstatusSistema,
 } = require('./lib/estatus-leads');
 const { registrarEtapaInicial, moverLeadEtapa } = require('./lib/lead-etapas-historial');
 const { normalizarTipoPersona } = require('./lib/leads');
 const { normalizarDatosCotizacion, guardarCotizacion } = require('./lib/cotizacion-guardar');
 const { assertPuedeVincularCotizacionEnLead } = require('./lib/cotizacion-vinculo');
+const {
+    ESTADO_AUTORIZACION,
+    puedeAutorizarCotizacionEspecial,
+    esCotizacionEspecialPendiente,
+    cotizacionEspecialBloqueaPdf,
+    resolverFlagsAlGuardar,
+    postGuardadoCotizacionEspecial,
+    aplicarEstatusLeadTrasGuardadoEspecial,
+    aplicarEstatusLeadTrasAutorizar,
+    aplicarRechazoLeadYCotizacion,
+    obtenerCotizacionPorId,
+} = require('./lib/cotizacion-especial');
 const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
 const reporteMaestro = require('./lib/reporteMaestro');
+const {
+    generarPdfDesdeFormulario,
+    generarPdfDesdeCotizacion,
+} = require('./lib/generar-pdf-cotizacion');
+
+const ROLES_COTIZADOR = ['super_admin', 'supervisor', 'admin_empresa', 'agente', 'agente_cotizador'];
+
+const enviarPdfCotizacion = (res, { buffer, nombreArchivo }) => {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo}"`);
+    res.send(buffer);
+};
 
 
 // 2. Activamos el pase VIP (CORS) y el lector de datos (JSON)
@@ -56,6 +82,7 @@ app.use(cors({
     origin: origenesPermitidos,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition'],
     credentials: true
 }));
 app.use(express.json());
@@ -77,33 +104,12 @@ const valorEstimadoValido = (valor) => {
     return Number.isFinite(n) && n > 0;
 };
 
-const sincronizarValorLeadDesdeCotizacion = async (db, leadId, cotizacionId) => {
-    const [filas] = await db.query(
-        'SELECT valor_activo FROM cotizaciones WHERE id = ? LIMIT 1',
-        [cotizacionId],
-    );
-    if (!filas.length || filas[0].valor_activo == null) return;
-    await db.query('UPDATE leads SET valor = ? WHERE id = ?', [filas[0].valor_activo, leadId]);
-};
-
-/** Un solo folio activo por lead; las demás cotizaciones del mismo lead quedan sin vincular. */
-const activarCotizacionEnLead = async (db, leadId, cotizacionId) => {
-    await assertPuedeVincularCotizacionEnLead(db, leadId, cotizacionId);
-    await db.query('UPDATE cotizaciones SET lead_id = NULL WHERE lead_id = ?', [leadId]);
-    await db.query('UPDATE cotizaciones SET lead_id = ? WHERE id = ?', [leadId, cotizacionId]);
-    await sincronizarValorLeadDesdeCotizacion(db, leadId, cotizacionId);
-};
-
-const obtenerValorActivoCotizacionLead = async (db, leadId) => {
-    const [filas] = await db.query(
-        `SELECT valor_activo FROM cotizaciones
-         WHERE lead_id = ?
-         ORDER BY folio DESC
-         LIMIT 1`,
-        [leadId],
-    );
-    return filas.length ? filas[0].valor_activo : null;
-};
+const {
+    obtenerSumaValorCotizacionesLead,
+    vincularCotizacionEnLead,
+    desvincularCotizacionDeLead,
+    obtenerIdsCotizacionesMismoLote,
+} = require('./lib/cotizacion-lead-vinculo');
 
 // --- CONFIGURACIÓN DE MIDDLEWARES ---
 
@@ -543,8 +549,8 @@ app.post('/api/estatus-leads',
             const codigo = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
             const [rango] = await db.query(
                 `SELECT COALESCE(MAX(orden), 0) AS max_orden FROM lead_estatus
-                 WHERE empresa_id = ? AND codigo NOT IN (?, ?)`,
-                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO],
+                 WHERE empresa_id = ? AND codigo NOT IN (?, ?, ?)`,
+                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO, CODIGO_PENDIENTE_AUTORIZACION],
             );
             const orden = Math.min((rango[0]?.max_orden || 0) + 1, ORDEN_CANCELADO - 1);
             const id = crypto.randomUUID();
@@ -594,7 +600,7 @@ app.put('/api/estatus-leads/:id',
             const fila = actual[0];
             const color = color_hex === '' || color_hex === 'sin_color' ? null : (color_hex ?? fila.color_hex);
 
-            if (fila.codigo === CODIGO_CANCELADO) {
+            if (fila.codigo === CODIGO_CANCELADO || fila.codigo === CODIGO_PENDIENTE_AUTORIZACION) {
                 await db.query('UPDATE lead_estatus SET nombre = ? WHERE id = ?', [nombreLimpio, id]);
                 return res.status(200).json({ mensaje: 'Estatus actualizado' });
             }
@@ -678,7 +684,7 @@ app.delete('/api/estatus-leads/:id',
         try {
             const [actual] = await db.query('SELECT * FROM lead_estatus WHERE id = ? LIMIT 1', [id]);
             if (!actual.length) return res.status(404).json({ error: 'Estatus no encontrado.' });
-            if (actual[0].es_sistema) {
+            if (esEstatusSistema(actual[0])) {
                 return res.status(400).json({ error: 'No se pueden eliminar los estatus del sistema.' });
             }
 
@@ -733,7 +739,10 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             u.nombre as agente_nombre,
             ps.nombre_etapa,
             
-            -- DATOS COMPLETOS DE LA COTIZACIÓN (última vinculada al lead)
+            (SELECT MIN(c_min.folio) FROM cotizaciones c_min WHERE c_min.lead_id = l.id) AS cotizacion_folio_min,
+            (SELECT COUNT(*) FROM cotizaciones c_cnt WHERE c_cnt.lead_id = l.id) AS cotizaciones_cantidad,
+
+            -- DATOS DE LA COTIZACIÓN DE MENOR FOLIO (vista por defecto en el tablero)
             c.id as cotizacion_id,
             c.folio as cotizacion_folio,
             c.tipo_activo as cotizacion_tipo_activo,
@@ -749,7 +758,9 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             c.renta_mensual_sin_iva as cotizacion_renta_sin_iva,
             c.vr_calculado as cotizacion_vr_calculado,
             c.porcentaje_vr as cotizacion_porcentaje_vr,
-            c.tipo_renta as cotizacion_tipo_renta
+            c.tipo_renta as cotizacion_tipo_renta,
+            c.es_especial as cotizacion_es_especial,
+            c.autorizacion_estado as cotizacion_autorizacion_estado
             
         FROM leads l
         LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
@@ -758,7 +769,7 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
         LEFT JOIN cotizaciones c ON c.id = (
             SELECT c2.id FROM cotizaciones c2
             WHERE c2.lead_id = l.id
-            ORDER BY c2.folio DESC
+            ORDER BY c2.folio ASC
             LIMIT 1
         )
         WHERE l.empresa_id = ?
@@ -858,7 +869,7 @@ app.put('/api/leads/:id',
             return res.status(400).json({ error: tipoPersonaNormalizado.error });
         }
 
-        const valorCotizacion = await obtenerValorActivoCotizacionLead(db, id);
+        const valorCotizacion = await obtenerSumaValorCotizacionesLead(db, id);
         const valorAGuardar = valorCotizacion != null ? valorCotizacion : valor;
 
         if (valorCotizacion == null && !valorEstimadoValido(valor)) {
@@ -917,6 +928,7 @@ app.get('/api/cotizaciones/buscar/:empresa_id', (req, res) => {
         FROM cotizaciones 
         WHERE empresa_id = ? 
         AND (lead_id IS NULL OR lead_id = '')
+        AND (es_especial = 0 OR es_especial IS NULL)
         AND (folio LIKE ? OR nombre_activo LIKE ? OR tipo_activo LIKE ?)
         ORDER BY folio DESC
         LIMIT 20
@@ -941,8 +953,8 @@ app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
     const db = pool.promise();
 
     try {
-        await activarCotizacionEnLead(db, lead_id, cotizacion_id);
-        res.json({ mensaje: 'Cotización asignada con éxito' });
+        await vincularCotizacionEnLead(pool, lead_id, cotizacion_id);
+        res.json({ mensaje: 'Cotización vinculada al prospecto.' });
     } catch (error) {
         console.error('❌ Error vinculando cotización al lead:', error.message);
         res.status(error.status || 500).json({ error: error.message || 'Error vinculando la cotización' });
@@ -1439,38 +1451,160 @@ transporter.verify().then(() => {
 // RUTAS DEL COTIZADOR
 // ==========================================
 
-// 1. Guardar una nueva cotización
-app.post('/api/cotizaciones', async (req, res) => {
+// 1. Guardar una o más cotizaciones idénticas (N unidades)
+app.post('/api/cotizaciones', verificarToken, async (req, res) => {
+    const esEspecialSolicitada = Boolean(req.body.es_especial);
     const datos = normalizarDatosCotizacion(req.body);
-    const { lead_id, valor_activo } = datos;
-    const nuevaCotizacionId = crypto.randomUUID();
+    if (req.usuarioCRM && req.usuarioCRM.id) {
+        datos.usuario_id = req.usuarioCRM.id;
+    }
+    const { lead_id } = datos;
+    const numUnidades = Math.max(1, parseInt(req.body.num_unidades, 10) || 1);
+    const loteId = numUnidades > 1 ? crypto.randomUUID() : null;
+    const db = pool.promise();
 
     try {
-        const { modo } = await guardarCotizacion(pool, nuevaCotizacionId, datos);
-
-        if (lead_id) {
-            const db = pool.promise();
-            await activarCotizacionEnLead(db, lead_id, nuevaCotizacionId);
+        if (esEspecialSolicitada) {
+            const flags = await resolverFlagsAlGuardar(db, {
+                es_especial: true,
+                usuario_id: datos.usuario_id,
+            });
+            datos.es_especial = flags.es_especial;
+            datos.autorizacion_estado = flags.autorizacion_estado;
+        } else {
+            datos.es_especial = 0;
+            datos.autorizacion_estado = null;
         }
 
-        const respuesta = { mensaje: '✅ Cotización guardada con éxito', id: nuevaCotizacionId };
-        if (modo === 'legado') {
+        const creadas = [];
+        let modoPersistencia = 'completo';
+
+        for (let i = 0; i < numUnidades; i += 1) {
+            const nuevaCotizacionId = crypto.randomUUID();
+            const datosUnidad = {
+                ...datos,
+                lote_id: loteId,
+                lead_id_origen_especial: null,
+            };
+
+            const { modo } = await guardarCotizacion(pool, nuevaCotizacionId, datosUnidad);
+            if (modo === 'legado') modoPersistencia = 'legado';
+
+            const cot = await obtenerCotizacionPorId(db, nuevaCotizacionId);
+            creadas.push({ id: nuevaCotizacionId, folio: cot?.folio ?? null });
+        }
+
+        if (lead_id) {
+            for (const { id } of creadas) {
+                await vincularCotizacionEnLead(pool, lead_id, id);
+            }
+        }
+
+        if (esEspecialSolicitada && creadas.length) {
+            await postGuardadoCotizacionEspecial(pool, transporter, {
+                cotizacionId: creadas[0].id,
+                empresaId: datos.empresa_id,
+                leadId: lead_id || null,
+                flags: {
+                    autorizacion_estado: datos.autorizacion_estado,
+                },
+                usuarioId: datos.usuario_id,
+                cantidadUnidades: creadas.length,
+            });
+        }
+
+        const respuesta = {
+            mensaje: numUnidades === 1
+                ? '✅ Cotización guardada con éxito'
+                : `✅ Se guardaron ${numUnidades} cotizaciones con éxito`,
+            id: creadas[0].id,
+            ids: creadas.map((c) => c.id),
+            folios: creadas.map((c) => c.folio),
+            cantidad: numUnidades,
+            lote_id: loteId,
+            es_especial: datos.es_especial,
+            autorizacion_estado: datos.autorizacion_estado,
+        };
+        if (modoPersistencia === 'legado') {
             respuesta.aviso = 'Parámetros del cotizador no persistidos: ejecuta db/migrations/schema-v2.sql (sección 10) para réplica idéntica.';
+        }
+        if (datos.autorizacion_estado === ESTADO_AUTORIZACION.PENDIENTE) {
+            respuesta.aviso_autorizacion = numUnidades > 1
+                ? 'Cotizaciones especiales pendientes de autorización (un solo trámite para todas las unidades).'
+                : 'Cotización especial pendiente de autorización por supervisor o administrador.';
         }
         res.status(201).json(respuesta);
     } catch (error) {
         console.error('❌ ERROR AL GUARDAR COTIZACIÓN:', error.sqlMessage || error.message || error);
         res.status(error.status || 500).json({
-            error: error.sqlMessage || error.message || 'Error al guardar en BD',
+            error: error.message || error.sqlMessage || 'Error al guardar en BD',
         });
     }
 });
+
+const autorizarCotizacionEspecialHandler = async (req, res, rechazar = false) => {
+    const { id } = req.params;
+    const db = pool.promise();
+
+    try {
+        const cot = await obtenerCotizacionPorId(db, id);
+        if (!cot) return res.status(404).json({ error: 'Cotización no encontrada.' });
+        if (!cot.es_especial) {
+            return res.status(400).json({ error: 'Esta cotización no es especial.' });
+        }
+        if (cot.autorizacion_estado !== ESTADO_AUTORIZACION.PENDIENTE) {
+            return res.status(400).json({ error: 'La cotización no está pendiente de autorización.' });
+        }
+        if (!puedeAutorizarCotizacionEspecial(req.usuarioCRM, cot.empresa_id)) {
+            return res.status(403).json({ error: 'No tienes permiso para autorizar cotizaciones especiales.' });
+        }
+
+        if (rechazar) {
+            await aplicarRechazoLeadYCotizacion(pool, id, cot.lead_id, cot.empresa_id);
+            const msgLote = cot.lote_id ? ' Las unidades del mismo lote también quedaron rechazadas.' : '';
+            return res.status(200).json({ mensaje: `Cotización especial rechazada. El prospecto quedó cancelado.${msgLote}` });
+        }
+
+        const idsLote = await obtenerIdsCotizacionesMismoLote(db, id);
+        const placeholders = idsLote.map(() => '?').join(', ');
+        await db.query(
+            `UPDATE cotizaciones SET autorizacion_estado = ? WHERE id IN (${placeholders})`,
+            [ESTADO_AUTORIZACION.APROBADA, ...idsLote],
+        );
+        if (cot.lead_id) {
+            await aplicarEstatusLeadTrasAutorizar(pool, cot.lead_id, cot.empresa_id);
+        }
+        const msgLote = idsLote.length > 1
+            ? ` Se autorizaron ${idsLote.length} unidades del mismo lote.`
+            : '';
+        return res.status(200).json({ mensaje: `Cotización especial autorizada.${msgLote}` });
+    } catch (error) {
+        console.error('❌ Error autorizando cotización especial:', error.message);
+        res.status(error.status || 500).json({ error: error.message || 'Error al procesar la autorización.' });
+    }
+};
+
+app.post(
+    '/api/cotizaciones/:id/autorizar-especial',
+    verificarToken,
+    revisarRol(['supervisor', 'admin_empresa']),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    (req, res) => autorizarCotizacionEspecialHandler(req, res, false),
+);
+
+app.post(
+    '/api/cotizaciones/:id/rechazar-especial',
+    verificarToken,
+    revisarRol(['supervisor', 'admin_empresa']),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    (req, res) => autorizarCotizacionEspecialHandler(req, res, true),
+);
 
 
 // 2. Obtener todas las cotizaciones de un Prospecto (Lead) en específico
 app.get('/api/cotizaciones/lead/:lead_id', (req, res) => {
     const { lead_id } = req.params;
-    pool.query('SELECT * FROM cotizaciones WHERE lead_id = ? ORDER BY fecha_creacion DESC', [lead_id], (error, resultados) => {
+    pool.query('SELECT * FROM cotizaciones WHERE lead_id = ? ORDER BY folio ASC', [lead_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
         res.status(200).json(resultados);
     });
@@ -1509,6 +1643,94 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     });
 });
 
+// PDF de cotización guardada (historial, leads, modal detalle)
+app.get(
+    '/api/cotizaciones/:id/pdf',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    async (req, res) => {
+        const { id } = req.params;
+        const db = pool.promise();
+
+        try {
+            const [filas] = await db.query(
+                `SELECT c.*, l.nombre AS lead_nombre
+                 FROM cotizaciones c
+                 LEFT JOIN leads l ON c.lead_id = l.id
+                 WHERE c.id = ?
+                 LIMIT 1`,
+                [id],
+            );
+
+            if (!filas.length) {
+                return res.status(404).json({ error: 'Cotización no encontrada.' });
+            }
+
+const cot = filas[0];
+            const { rol, id: usuarioId } = req.usuarioCRM;
+            
+            // EL CHISMOSO: Forzamos texto y quitamos espacios invisibles
+            const idBD = String(cot.usuario_id).trim();
+            const idToken = String(usuarioId).trim();
+
+            if ((rol === 'agente' || rol === 'agente_cotizador') && idBD !== idToken) {
+                return res.status(403).json({ 
+                    error: `No tienes acceso. BD dice: [${idBD}] pero Token dice: [${idToken}]` 
+                });
+            }
+            if (cotizacionEspecialBloqueaPdf(cot)) {
+                return res.status(403).json({
+                    error: 'El PDF no está disponible hasta autorizar la cotización especial.',
+                });
+            }
+
+            const nombreProspecto = req.query.nombre_prospecto || cot.lead_nombre;
+            const pdf = await generarPdfDesdeCotizacion(cot, nombreProspecto);
+            enviarPdfCotizacion(res, pdf);
+        } catch (error) {
+            console.error('❌ Error generando PDF de cotización:', error.message);
+            res.status(error.status || 500).json({
+                error: error.message || 'Error al generar el PDF.',
+                detalle: error.detalle,
+            });
+        }
+    },
+);
+
+// PDF en vivo desde el cotizador (sin folio; no persiste)
+app.post(
+    '/api/cotizaciones/pdf',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    async (req, res) => {
+        try {
+            const { formData, nombre_prospecto: nombreProspecto, modo_cotizacion_especial: modoEspecial } = req.body || {};
+            if (!formData || typeof formData !== 'object') {
+                return res.status(400).json({ error: 'Falta el formulario de la cotización (formData).' });
+            }
+            if (modoEspecial) {
+                return res.status(403).json({
+                    error: 'El PDF no está disponible en cotización especial hasta que sea autorizada.',
+                });
+            }
+
+            const pdf = await generarPdfDesdeFormulario({
+                formData,
+                folio: null,
+                nombreProspecto: nombreProspecto || formData.nombre_cliente,
+            });
+            enviarPdfCotizacion(res, pdf);
+        } catch (error) {
+            console.error('❌ Error generando PDF preview:', error.message);
+            res.status(error.status || 500).json({
+                error: error.message || 'Error al generar el PDF.',
+                detalle: error.detalle,
+            });
+        }
+    },
+);
+
 // Obtener una cotización por ID (réplica / detalle; después de rutas con segmento fijo)
 app.get('/api/cotizaciones/:id', (req, res) => {
     const { id } = req.params;
@@ -1519,18 +1741,30 @@ app.get('/api/cotizaciones/:id', (req, res) => {
     });
 });
 
-// 4. Vincular una cotización existente a un prospecto
+// 4. Vincular una cotización existente a un prospecto (sin desvincular las demás)
 app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
     const { id } = req.params;
     const { lead_id } = req.body;
-    const db = pool.promise();
 
     try {
-        await activarCotizacionEnLead(db, lead_id, id);
+        await vincularCotizacionEnLead(pool, lead_id, id);
         res.status(200).json({ mensaje: '✅ Cotización vinculada al prospecto' });
     } catch (error) {
         console.error('❌ Error vinculando cotización al prospecto:', error.message);
         res.status(error.status || 500).json({ error: error.message || 'Error al vincular cotización' });
+    }
+});
+
+// 5. Desvincular cotización del prospecto (sin borrar el registro)
+app.put('/api/cotizaciones/:id/desvincular-lead', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const resultado = await desvincularCotizacionDeLead(pool, id);
+        res.status(200).json({ mensaje: resultado.mensaje });
+    } catch (error) {
+        console.error('❌ Error desvinculando cotización:', error.message);
+        res.status(error.status || 500).json({ error: error.message || 'Error al desvincular cotización' });
     }
 });
 
@@ -1593,6 +1827,14 @@ app.get('/api/dashboard/:empresa_id', verificarToken, revisarRol(['super_admin',
 
 // 10. Encendemos el servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const servidor = app.listen(PORT, () => {
     console.log(`🚀 Servidor CRM corriendo en: http://localhost:${PORT}`);
 });
+
+const apagarServidor = (signal) => {
+    console.log(`\n${signal} recibido. Cerrando servidor…`);
+    servidor.close(() => process.exit(0));
+};
+
+process.on('SIGINT', () => { apagarServidor('SIGINT'); });
+process.on('SIGTERM', () => { apagarServidor('SIGTERM'); });

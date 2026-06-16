@@ -74,15 +74,30 @@ export const crearLeadOportunidad = async (api, {
   return id;
 };
 
-/** Deja un solo folio activo en el lead; libera los demás. */
+/** Vincula una cotización al prospecto (sin desvincular las demás). */
 export const vincularCotizacionActiva = async (api, cotizacionId, leadId) => {
   await api.put(`/cotizaciones/${cotizacionId}/vincular-lead`, { lead_id: leadId });
 };
 
-/** Prospecto con folio congelado (cancelado o estatus con bloqueo). */
+/** Vincula varias cotizaciones al mismo prospecto. */
+export const vincularCotizacionesAlLead = async (api, cotizacionIds, leadId) => {
+  for (const cotizacionId of cotizacionIds) {
+    await vincularCotizacionActiva(api, cotizacionId, leadId);
+  }
+};
+
+/** Desvincula una cotización del prospecto sin borrar el registro. */
+export const desvincularCotizacionDeLead = async (api, cotizacionId) => {
+  await api.put(`/cotizaciones/${cotizacionId}/desvincular-lead`);
+};
+
+const CODIGO_PENDIENTE_AUTORIZACION = 'pendiente_autorizacion';
+
+/** Prospecto con folio congelado (cancelado, pendiente autorización o estatus con bloqueo). */
 export const leadBloqueaCotizacion = (lead) => {
   if (!lead) return false;
   if (lead.estatus_codigo === 'cancelado') return true;
+  if (lead.estatus_codigo === CODIGO_PENDIENTE_AUTORIZACION) return true;
   return lead.estatus_bloquea_cotizacion === 1 || lead.estatus_bloquea_cotizacion === true;
 };
 

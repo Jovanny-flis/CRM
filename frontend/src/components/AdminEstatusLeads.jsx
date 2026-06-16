@@ -4,9 +4,15 @@ import { MoreVertical } from 'lucide-react';
 
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
+const CODIGO_PENDIENTE_AUTORIZACION = 'pendiente_autorizacion';
 const UMBRAL_ARRASTRE = 8;
 
-const esSistema = (e) => e.codigo === CODIGO_ACTIVO || e.codigo === CODIGO_CANCELADO;
+const esSistema = (e) =>
+  e.codigo === CODIGO_ACTIVO
+  || e.codigo === CODIGO_CANCELADO
+  || e.codigo === CODIGO_PENDIENTE_AUTORIZACION
+  || e.es_sistema === 1
+  || e.es_sistema === true;
 
 function AdminEstatusLeads({ empresaId }) {
   const [estatus, setEstatus] = useState([]);
@@ -70,6 +76,7 @@ function AdminEstatusLeads({ empresaId }) {
   }, []);
 
   const activo = estatus.find((e) => e.codigo === CODIGO_ACTIVO);
+  const pendienteAutorizacion = estatus.find((e) => e.codigo === CODIGO_PENDIENTE_AUTORIZACION);
   const cancelado = estatus.find((e) => e.codigo === CODIGO_CANCELADO);
 
   const reordenarLocal = (fromId, toId) => {
@@ -285,6 +292,7 @@ function AdminEstatusLeads({ empresaId }) {
 
   const esActivo = editando?.codigo === CODIGO_ACTIVO;
   const esCancelado = editando?.codigo === CODIGO_CANCELADO;
+  const esPendienteAutorizacion = editando?.codigo === CODIGO_PENDIENTE_AUTORIZACION;
   const esPersonalizado = editando && !esSistema(editando);
 
   if (!empresaId) {
@@ -303,13 +311,14 @@ function AdminEstatusLeads({ empresaId }) {
         <h3 className="font-black text-slate-800 text-lg mb-1">Estatus de prospectos</h3>
         <p className="text-sm text-slate-500">
           Mantén presionado el icono de menú y arrastra para reordenar estatus personalizados.
-          Activo y Cancelado son obligatorios (solo renombrables).
+          Activo, Pendiente de autorización y Cancelado son obligatorios (solo renombrables).
         </p>
       </div>
 
       <div className="space-y-2">
         {activo && filaEstatus(activo)}
         {personalizadosOrden.map((item) => filaEstatus(item, { esArrastrable: true }))}
+        {pendienteAutorizacion && filaEstatus(pendienteAutorizacion)}
         {cancelado && filaEstatus(cancelado)}
       </div>
 
@@ -428,6 +437,12 @@ function AdminEstatusLeads({ empresaId }) {
                 {esCancelado && (
                   <p className="text-xs text-slate-400">
                     El estatus cancelado usa color fijo (gris), no aparece en la suma del bin y congela el folio asignado permanentemente.
+                  </p>
+                )}
+
+                {esPendienteAutorizacion && (
+                  <p className="text-xs text-slate-400">
+                    Pendiente de autorización usa color fijo (ámbar), aparece en la suma del bin, no permite mover en el embudo y congela el folio asignado hasta aceptar o rechazar la cotización especial.
                   </p>
                 )}
 

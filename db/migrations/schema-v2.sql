@@ -18,6 +18,7 @@
 --   • cotizaciones: parámetros del cotizador (tasa, pagos, seguro, GPS, etc.) para réplica idéntica
 --   • gps_proveedores + gps_productos — catálogo GPS por empresa (cotizador)
 --   • leads: tipo_persona (PM | PF | PFAE, opcional)
+--   • lead_estatus pendiente_autorizacion + cotizaciones es_especial / autorizacion_estado
 --
 -- Semilla incremental en runtime (si faltan datos tras la migración):
 --   • lib/canales.js — catálogo raíz al crear empresa (POST /empresas); no re-sembrar en GET /medios
@@ -244,6 +245,27 @@ WHERE NOT EXISTS (
   WHERE le.`empresa_id` = e.`id` AND le.`codigo` = 'cancelado'
 );
 
+INSERT INTO `lead_estatus` (
+  `id`, `empresa_id`, `codigo`, `nombre`, `color_hex`,
+  `incluir_en_suma`, `permite_mover`, `bloquea_cotizacion`, `es_sistema`, `orden`
+)
+SELECT UUID(), e.`id`, 'pendiente_autorizacion', 'Pendiente autorización', '#f59e0b', 1, 0, 1, 1, 500
+FROM `empresas` e
+WHERE NOT EXISTS (
+  SELECT 1 FROM `lead_estatus` le
+  WHERE le.`empresa_id` = e.`id` AND le.`codigo` = 'pendiente_autorizacion'
+);
+
+UPDATE `lead_estatus`
+SET
+  `es_sistema` = 1,
+  `incluir_en_suma` = 1,
+  `permite_mover` = 0,
+  `bloquea_cotizacion` = 1,
+  `color_hex` = '#f59e0b',
+  `orden` = 500
+WHERE `codigo` = 'pendiente_autorizacion';
+
 UPDATE `leads` l
 INNER JOIN `lead_estatus` ea ON ea.`empresa_id` = l.`empresa_id` AND ea.`codigo` = 'activo'
 INNER JOIN `lead_estatus` ec ON ec.`empresa_id` = l.`empresa_id` AND ec.`codigo` = 'cancelado'
@@ -361,6 +383,38 @@ CREATE TABLE IF NOT EXISTS `gps_productos` (
   CONSTRAINT `fk_gps_productos_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `gps_proveedores` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------
+-- 12 Columnas de rentas en deposito para cotizacionea
+
+CALL crm_add_column_if_missing('cotizaciones', 'is_rentas_deposito', 
+  'TINYINT(1) NULL DEFAULT 0');
+
+CALL crm_add_column_if_missing('cotizaciones', 'rentas_deposito_cantidad', 
+  'INT NULL DEFAULT 0');
+
+CALL crm_add_column_if_missing('cotizaciones', 'rentas_deposito_valor', 
+  'DECIMAL(12,4) NULL DEFAULT 0');
+
+
+-- Modificar el ENUM de roles en usuarios
+ALTER TABLE usuarios MODIFY COLUMN rol ENUM('super_admin', 'admin_empresa', 'supervisor', 'agente', 'agente_cotizador') DEFAULT 'agente';
+
+-- -----------------------------------------------------------------------------
+-- 13) Cotización especial — flag y estado de autorización
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('cotizaciones', 'es_especial',
+  "TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Parámetros fuera de límites estándar' AFTER `renta_mensual_con_iva`");
+CALL crm_add_column_if_missing('cotizaciones', 'autorizacion_estado',
+  "VARCHAR(20) NULL DEFAULT NULL COMMENT 'pendiente | aprobada | rechazada; NULL si no aplica' AFTER `es_especial`");
+
+-- -----------------------------------------------------------------------------
+-- 14) Cotizaciones — lote (unidades múltiples) y origen especial
+-- -----------------------------------------------------------------------------
+CALL crm_add_column_if_missing('cotizaciones', 'lote_id',
+  "VARCHAR(36) NULL DEFAULT NULL COMMENT 'Agrupa cotizaciones creadas en el mismo guardado (N unidades)' AFTER `autorizacion_estado`");
+CALL crm_add_column_if_missing('cotizaciones', 'lead_id_origen_especial',
+  "VARCHAR(36) NULL DEFAULT NULL COMMENT 'Prospecto de nacimiento para cotizaciones especiales' AFTER `lote_id`");
+
 -- -----------------------------------------------------------------------------
 -- Fin (los procedimientos crm_add_* pueden quedarse para futuras ampliaciones)
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------

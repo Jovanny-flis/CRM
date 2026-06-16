@@ -17,7 +17,8 @@
     "express": "^5.2.1",
     "firebase-admin": "^13.8.0",
     "mysql2": "^3.22.1",
-    "nodemailer": "^8.0.6"
+    "nodemailer": "^8.0.6",
+    "pdfmake": "^0.3.10"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
