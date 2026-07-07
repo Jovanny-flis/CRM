@@ -62,6 +62,21 @@ export const parseNumeroFormulario = (val) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/** Solo dígitos; permite vacío (plazo, unidades, rentas en depósito). */
+export const filtrarEnteroEnFormulario = (val) => {
+  if (val === '' || val == null) return '';
+  return String(val).replace(/\D/g, '');
+};
+
+/** Dígitos y un solo punto decimal; sin comas de miles (tasa, %, montos simples). */
+export const filtrarDecimalEnFormulario = (val) => {
+  if (val === '' || val == null) return '';
+  let raw = String(val).replace(/[^0-9.]/g, '');
+  const parts = raw.split('.');
+  if (parts.length > 2) raw = `${parts[0]}.${parts.slice(1).join('')}`;
+  return raw;
+};
+
 export const formDataCotizadorVacio = () => ({
   numUnidades: '1',
   lead_id: '',
