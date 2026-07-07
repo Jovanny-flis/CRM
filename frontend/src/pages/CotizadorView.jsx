@@ -13,6 +13,8 @@ import {
   cotizacionAFormData,
   formDataAPayloadCotizacion,
   formDataCotizadorVacio,
+  filtrarDecimalEnFormulario,
+  filtrarEnteroEnFormulario,
   formatMontoEnFormulario,
   parseNumeroFormulario,
   limpiarCamposSoloAutomotriz,
@@ -116,10 +118,6 @@ function calcularPMT(tasaAnual, n, pv, fv) {
 }
 
 const formatMontoFormulario = formatMontoEnFormulario;
-
-const evitarCambioPorScrollEnNumero = (e) => {
-  e.preventDefault();
-};
 
 const CotizadorView = () => {
   const location = useLocation();
@@ -637,22 +635,20 @@ const CotizadorView = () => {
                 Nº de unidades
               </label>
               <input
-                type="number"
-                min="1"
-                step="1"
+                type="text"
+                inputMode="numeric"
                 value={formData.numUnidades}
                 onChange={(e) => {
-                  const raw = e.target.value;
+                  const raw = filtrarEnteroEnFormulario(e.target.value);
                   if (raw === '') {
                     setFormData({ ...formData, numUnidades: '' });
                     return;
                   }
                   const n = parseInt(raw, 10);
                   if (Number.isFinite(n) && n >= 1) {
-                    setFormData({ ...formData, numUnidades: String(n) });
+                    setFormData({ ...formData, numUnidades: raw });
                   }
                 }}
-                onWheel={evitarCambioPorScrollEnNumero}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
                 placeholder="1"
               />
@@ -828,13 +824,11 @@ const CotizadorView = () => {
                 Plazo (meses)
               </label>
               <input 
-                type="number" 
-                min="12" 
-                max="72" 
+                type="text"
+                inputMode="numeric"
                 value={formData.plazo} 
-                onChange={e => setFormData({...formData, plazo: e.target.value})}
-                onWheel={evitarCambioPorScrollEnNumero}
-                className={`input-sin-spinners w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.plazo ? 'border-red-500' : 'border-slate-200'}`} 
+                onChange={e => setFormData({ ...formData, plazo: filtrarEnteroEnFormulario(e.target.value) })}
+                className={`w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.plazo ? 'border-red-500' : 'border-slate-200'}`} 
               />
             </div>
 
@@ -843,11 +837,11 @@ const CotizadorView = () => {
                 Tasa anual (%)
               </label>
               <input 
-                type="number" 
+                type="text"
+                inputMode="decimal"
                 value={formData.tasaAnual} 
-                onChange={e => setFormData({...formData, tasaAnual: e.target.value})}
-                onWheel={evitarCambioPorScrollEnNumero}
-                className={`input-sin-spinners w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.tasa ? 'border-red-500' : 'border-slate-200'}`} 
+                onChange={e => setFormData({ ...formData, tasaAnual: filtrarDecimalEnFormulario(e.target.value) })}
+                className={`w-full bg-slate-50 border rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.tasa ? 'border-red-500' : 'border-slate-200'}`} 
               />
             </div>
 
@@ -857,11 +851,11 @@ const CotizadorView = () => {
               </label>
               <div className="flex gap-2">
                 <input 
-                  type="number" 
+                  type="text"
+                  inputMode="decimal"
                   value={formData.pagoInicial} 
-                  onChange={e => setFormData({...formData, pagoInicial: e.target.value})}
-                  onWheel={evitarCambioPorScrollEnNumero}
-                  className={`input-sin-spinners flex-1 border bg-white rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.pagoInicial ? 'border-red-500' : 'border-slate-200'}`} 
+                  onChange={e => setFormData({ ...formData, pagoInicial: filtrarDecimalEnFormulario(e.target.value) })}
+                  className={`flex-1 border bg-white rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.pagoInicial ? 'border-red-500' : 'border-slate-200'}`} 
                 />
                 <ToggleBtn flag={formData.isPagoInicialPct} onClick={() => setFormData({...formData, isPagoInicialPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isPagoInicialPct} onClick={() => setFormData({...formData, isPagoInicialPct: false})} label="$" />
@@ -875,11 +869,11 @@ const CotizadorView = () => {
               </label>
               <div className="flex gap-2">
                 <input 
-                  type="number" 
+                  type="text"
+                  inputMode="decimal"
                   value={formData.residual} 
-                  onChange={e => setFormData({...formData, residual: e.target.value})}
-                  onWheel={evitarCambioPorScrollEnNumero}
-                  className="input-sin-spinners flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
+                  onChange={e => setFormData({ ...formData, residual: filtrarDecimalEnFormulario(e.target.value) })}
+                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 />
                 <ToggleBtn flag={formData.isResidualPct} onClick={() => setFormData({...formData, isResidualPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isResidualPct} onClick={() => setFormData({...formData, isResidualPct: false})} label="$" />
@@ -893,11 +887,11 @@ const CotizadorView = () => {
               </label>
               <div className="flex gap-2">
                 <input 
-                  type="number" 
+                  type="text"
+                  inputMode="decimal"
                   value={formData.comision} 
-                  onChange={e => setFormData({...formData, comision: e.target.value})}
-                  onWheel={evitarCambioPorScrollEnNumero}
-                  className="input-sin-spinners flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
+                  onChange={e => setFormData({ ...formData, comision: filtrarDecimalEnFormulario(e.target.value) })}
+                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all" 
                 />
                 <ToggleBtn flag={formData.isComisionPct} onClick={() => setFormData({...formData, isComisionPct: true})} label="%" />
                 <ToggleBtn flag={!formData.isComisionPct} onClick={() => setFormData({...formData, isComisionPct: false})} label="$" />
@@ -925,13 +919,12 @@ const CotizadorView = () => {
               {formData.isRentasDeposito && (
                 <div className="flex gap-2 mt-3 animate-fade-in">
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
                     placeholder="Cantidad de rentas (ej. 1, 2)"
                     value={formData.rentasDepositoCantidad}
-                    onChange={e => setFormData({ ...formData, rentasDepositoCantidad: e.target.value })}
-                    onWheel={evitarCambioPorScrollEnNumero}
-                    className="input-sin-spinners flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                    onChange={e => setFormData({ ...formData, rentasDepositoCantidad: filtrarEnteroEnFormulario(e.target.value) })}
+                    className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
                   />
                   <div className="flex items-center px-3 bg-slate-200 text-slate-600 rounded-xl text-sm font-bold">
                     Meses
