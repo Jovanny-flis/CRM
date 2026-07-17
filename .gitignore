@@ -4,4 +4,5 @@ firebase-key.json
 *.DS_Store
 
 # Imágenes del PDF (copiar manualmente a assets/ en cada entorno)
-assets/
+assets/tmp/
+stderr.log

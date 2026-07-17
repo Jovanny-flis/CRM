@@ -1,0 +1,8 @@
+node_modules
+.git
+tmp
+stderr.log
+.env
+.env.example
+firebase-key.json
+.htaccess

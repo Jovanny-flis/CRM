@@ -1830,6 +1830,8 @@ const PORT = process.env.PORT || 3000;
 const servidor = app.listen(PORT, () => {
     console.log(`🚀 Servidor CRM corriendo en: http://localhost:${PORT}`);
 });
+servidor.keepAliveTimeout = 65000;
+servidor.headersTimeout = 66000;
 
 const apagarServidor = (signal) => {
     console.log(`\n${signal} recibido. Cerrando servidor…`);
