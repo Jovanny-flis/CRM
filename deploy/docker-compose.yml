@@ -1,0 +1,65 @@
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      - MARIADB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+      - MARIADB_DATABASE=${DB_NAME}
+      - MARIADB_USER=${DB_USER}
+      - MARIADB_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - crm_db_data:/var/lib/mysql
+    networks:
+      - crm-internal
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file:
+      - ../.env
+    volumes:
+      - ../firebase-key.json:/app/firebase-key.json:ro
+    networks:
+      - crm-internal
+      - traefik-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.crm-api.rule=Host(`api.flising.cloud`)
+      - traefik.http.routers.crm-api.entrypoints=websecure
+      - traefik.http.routers.crm-api.tls.certresolver=letsencrypt
+      - traefik.http.services.crm-api.loadbalancer.server.port=3000
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID}
+    restart: unless-stopped
+    networks:
+      - traefik-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.crm-frontend.rule=Host(`flow.flising.cloud`)
+      - traefik.http.routers.crm-frontend.entrypoints=websecure
+      - traefik.http.routers.crm-frontend.tls.certresolver=letsencrypt
+      - traefik.http.services.crm-frontend.loadbalancer.server.port=80
+
+networks:
+  crm-internal:
+    driver: bridge
+  traefik-proxy:
+    external: true
+
+volumes:
+  crm_db_data:
