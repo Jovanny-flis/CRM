@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import { Users, DollarSign, FileText, ArrowRight, Calculator } from 'lucide-react';
+import DashboardKpisPanel from '../components/DashboardKpisPanel';
+import ComisionesPanel from '../components/ComisionesPanel';
+
+// Roles que pueden ver los indicadores generales del equipo (KPIs).
+// Los vendedores (agente) NO ven esta sección, solo su propia comisión.
+const ROLES_CON_KPIS = ['super_admin', 'admin_empresa', 'supervisor'];
 
 const DashboardView = () => {
   const [stats, setStats] = useState({ totalLeads: 0, totalValor: 0, totalCotizaciones: 0 });
@@ -11,6 +17,8 @@ const DashboardView = () => {
   const usuarioLogueado = JSON.parse(localStorage.getItem('usuarioCRM') || '{}');
   const empresaId = usuarioLogueado.empresa_id;
   const nombreUsuario = usuarioLogueado.nombre ? usuarioLogueado.nombre.split(' ')[0] : 'Usuario';
+  const puedeVerKpis = ROLES_CON_KPIS.includes(usuarioLogueado.rol);
+  const esVendedorSolo = usuarioLogueado.rol === 'agente';
 
   useEffect(() => {
     if (empresaId) {
@@ -94,6 +102,20 @@ const DashboardView = () => {
         </div>
 
       </div>
+
+      {/* INDICADORES DEL EQUIPO (KPIs) — solo admin/supervisor/super_admin */}
+      {puedeVerKpis && empresaId && (
+        <DashboardKpisPanel empresaId={empresaId} />
+      )}
+
+      {/* COMISIONES — todos la ven, pero un vendedor solo ve la suya (lo filtra el backend) */}
+      {empresaId && (
+        <ComisionesPanel
+          empresaId={empresaId}
+          usuarioId={usuarioLogueado.id}
+          esVendedorSolo={esVendedorSolo}
+        />
+      )}
 
       {/* ACCESOS DIRECTOS */}
       <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4">Accesos Rápidos</h2>
