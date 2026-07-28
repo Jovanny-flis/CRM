@@ -46,6 +46,8 @@ const {
 } = require('./lib/cotizacion-especial');
 const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalogo');
 const reporteMaestro = require('./lib/reporteMaestro');
+const dashboardKpis = require('./lib/dashboard-kpis');
+const comisiones = require('./lib/comisiones');
 const {
     generarPdfDesdeFormulario,
     generarPdfDesdeCotizacion,
@@ -88,6 +90,8 @@ app.use(cors({
 app.use(express.json());
 
 app.use(reporteMaestro);
+app.use(dashboardKpis);
+app.use(comisiones);
 
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
 // super_admin pasa siempre. El resto debe coincidir con su empresa_id.
