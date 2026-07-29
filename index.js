@@ -54,6 +54,8 @@ const {
 } = require('./lib/generar-pdf-cotizacion');
 
 const ROLES_COTIZADOR = ['super_admin', 'supervisor', 'admin_empresa', 'agente', 'agente_cotizador'];
+// riesgos: solo consulta y descarga de PDF, nunca puede crear/editar/vincular cotizaciones.
+const ROLES_CONSULTA_COTIZACIONES = [...ROLES_COTIZADOR, 'riesgos'];
 
 const enviarPdfCotizacion = (res, { buffer, nombreArchivo }) => {
     res.setHeader('Content-Type', 'application/pdf');
@@ -922,7 +924,12 @@ app.put('/api/leads/:id',
 
 
 // Buscar cotizaciones huérfanas (sin lead asignado) para el buscador inteligente
-app.get('/api/cotizaciones/buscar/:empresa_id', (req, res) => {
+app.get(
+    '/api/cotizaciones/buscar/:empresa_id',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    validarEmpresaParam('empresa_id'),
+    (req, res) => {
     const { empresa_id } = req.params;
     const termino = req.query.termino || ''; // Manejo seguro si no escriben nada
     
@@ -951,7 +958,11 @@ app.get('/api/cotizaciones/buscar/:empresa_id', (req, res) => {
 
 
 // Asignar o reasignar una cotización a un Lead
-app.put('/api/leads/:lead_id/vincular-cotizacion', async (req, res) => {
+app.put(
+    '/api/leads/:lead_id/vincular-cotizacion',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    async (req, res) => {
     const { lead_id } = req.params;
     const { cotizacion_id } = req.body;
     const db = pool.promise();
@@ -1456,7 +1467,7 @@ transporter.verify().then(() => {
 // ==========================================
 
 // 1. Guardar una o más cotizaciones idénticas (N unidades)
-app.post('/api/cotizaciones', verificarToken, async (req, res) => {
+app.post('/api/cotizaciones', verificarToken, revisarRol(ROLES_COTIZADOR), async (req, res) => {
     const esEspecialSolicitada = Boolean(req.body.es_especial);
     const datos = normalizarDatosCotizacion(req.body);
     if (req.usuarioCRM && req.usuarioCRM.id) {
@@ -1606,7 +1617,11 @@ app.post(
 
 
 // 2. Obtener todas las cotizaciones de un Prospecto (Lead) en específico
-app.get('/api/cotizaciones/lead/:lead_id', (req, res) => {
+app.get(
+    '/api/cotizaciones/lead/:lead_id',
+    verificarToken,
+    revisarRol(ROLES_CONSULTA_COTIZACIONES),
+    (req, res) => {
     const { lead_id } = req.params;
     pool.query('SELECT * FROM cotizaciones WHERE lead_id = ? ORDER BY folio ASC', [lead_id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -1615,9 +1630,17 @@ app.get('/api/cotizaciones/lead/:lead_id', (req, res) => {
 });
 
 
-app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
+app.get(
+    '/api/cotizaciones/empresa/:empresa_id',
+    verificarToken,
+    revisarRol(ROLES_CONSULTA_COTIZACIONES),
+    validarEmpresaParam('empresa_id'),
+    (req, res) => {
     const { empresa_id } = req.params;
-    const { usuario_id, rol } = req.query; 
+    // El rol y usuario_id se toman del token verificado, NUNCA del query string
+    // (antes se confiaba en ?rol=/&usuario_id= del navegador, lo que permitía a un
+    // agente pedir ?rol=admin_empresa y ver cotizaciones de toda la empresa).
+    const { rol, id: usuario_id } = req.usuarioCRM;
     
     // Usamos GROUP BY c.id para colapsar cualquier duplicado fantasma
     let query = `
@@ -1629,7 +1652,7 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
     `;
     
     const params = [empresa_id];
-// Aplicamos el filtro si es agente o si es agente_cotizador
+// Aplicamos el filtro si es agente o si es agente_cotizador (riesgos, supervisor y admin ven todo)
     if (rol === 'agente' || rol === 'agente_cotizador') {
         query += ` AND c.usuario_id = ?`;
         params.push(usuario_id);
@@ -1651,7 +1674,7 @@ app.get('/api/cotizaciones/empresa/:empresa_id', (req, res) => {
 app.get(
     '/api/cotizaciones/:id/pdf',
     verificarToken,
-    revisarRol(ROLES_COTIZADOR),
+    revisarRol(ROLES_CONSULTA_COTIZACIONES),
     validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
     async (req, res) => {
         const { id } = req.params;
@@ -1736,7 +1759,12 @@ app.post(
 );
 
 // Obtener una cotización por ID (réplica / detalle; después de rutas con segmento fijo)
-app.get('/api/cotizaciones/:id', (req, res) => {
+app.get(
+    '/api/cotizaciones/:id',
+    verificarToken,
+    revisarRol(ROLES_CONSULTA_COTIZACIONES),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    (req, res) => {
     const { id } = req.params;
     pool.query('SELECT * FROM cotizaciones WHERE id = ?', [id], (error, resultados) => {
         if (error) return res.status(500).json({ error: error.message });
@@ -1746,7 +1774,12 @@ app.get('/api/cotizaciones/:id', (req, res) => {
 });
 
 // 4. Vincular una cotización existente a un prospecto (sin desvincular las demás)
-app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
+app.put(
+    '/api/cotizaciones/:id/vincular-lead',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    async (req, res) => {
     const { id } = req.params;
     const { lead_id } = req.body;
 
@@ -1760,7 +1793,12 @@ app.put('/api/cotizaciones/:id/vincular-lead', async (req, res) => {
 });
 
 // 5. Desvincular cotización del prospecto (sin borrar el registro)
-app.put('/api/cotizaciones/:id/desvincular-lead', async (req, res) => {
+app.put(
+    '/api/cotizaciones/:id/desvincular-lead',
+    verificarToken,
+    revisarRol(ROLES_COTIZADOR),
+    validarRecursoEmpresa('SELECT empresa_id FROM cotizaciones WHERE id = ? LIMIT 1', 'id'),
+    async (req, res) => {
     const { id } = req.params;
 
     try {

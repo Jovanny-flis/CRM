@@ -155,6 +155,7 @@ function AgentesView() {
                       agente.rol === 'super_admin' ? 'bg-slate-800 text-white' :
                       agente.rol === 'admin_empresa' ? 'bg-purple-50 text-purple-600 border border-purple-200' : 
                       agente.rol === 'supervisor' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 
+                      agente.rol === 'riesgos' ? 'bg-sky-50 text-sky-600 border border-sky-200' :
                       'bg-emerald-50 text-emerald-600 border border-emerald-200'
                     }`}>
                       {agente.rol.replace('_', ' ')}
@@ -247,6 +248,7 @@ function AgentesView() {
                   >
                     <option value="agente_cotizador">Agente Cotizador (Solo usa el Cotizador)</option>
                     <option value="agente">Agente (Solo ve sus leads)</option>
+                    <option value="riesgos">Riesgos (Solo consulta y descarga PDF de cotizaciones)</option>
                     <option value="supervisor">Supervisor (Ve todo el equipo)</option>
                     <option value="admin_empresa">Administrador (Control total de la empresa)</option>
                     {isSuperAdmin && <option value="super_admin">Super Admin (Sistema Global)</option>}
