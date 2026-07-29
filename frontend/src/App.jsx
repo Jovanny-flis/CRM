@@ -72,8 +72,17 @@ function App() {
       <DashboardLayout>
         <Routes>
           {/* Rutas para TODOS (Super admin, admin, supervisor, agente) */}
-          <Route path="/" element={<DashboardView />} />
-          <Route path="/leads" element={<LeadsView />} />
+          <Route path="/" element={
+            <RutaProtegida rolesPermitidos={['super_admin', 'admin_empresa', 'supervisor', 'agente']} rolActual={usuario.rol}>
+              <DashboardView />
+            </RutaProtegida>
+          } />
+          <Route path="/leads" element={
+            <RutaProtegida rolesPermitidos={['super_admin', 'admin_empresa', 'supervisor', 'agente']} rolActual={usuario.rol}>
+              <LeadsView />
+            </RutaProtegida>
+          } />
+          {/* Cotizador y Directorio Maestro: incluye riesgos (solo consulta y descarga de PDF, ver CotizadorView) */}
           <Route path="/cotizador" element={<CotizadorView />} />
           <Route path="/maestro-leads" element={<ListaMaestraLeads />} />
           {/* 🛡️ Rutas PROTEGIDAS (Ejemplo: Solo admins ven Empresas y Agentes) */}

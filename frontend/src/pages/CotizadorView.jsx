@@ -553,6 +553,112 @@ const CotizadorView = () => {
   if (cargando) return <div className="p-10 text-center font-medium text-slate-500">Cargando cotizador...</div>;
   if (!empresaId) return <div className="p-10 text-center text-slate-500 bg-slate-50 rounded-2xl m-8"><h2 className="text-xl font-bold">Vista Global</h2><p>Inicia sesión como Agente o Admin para cotizar.</p></div>;
 
+  // Rol riesgos: solo consulta y descarga de PDF. Nunca ve el formulario de armar
+  // cotizaciones ni acciones que modifiquen algo (replicar, vincular/desvincular lead).
+  if (usuarioLogueado.rol === 'riesgos') {
+    return (
+      <div className="font-sans max-w-7xl mx-auto pb-20">
+        <header className="mb-8">
+          <h1 className="text-3xl font-extrabold text-primary tracking-tight">Cotizaciones</h1>
+          <p className="text-slate-500 mt-1">Consulta y descarga en PDF de todas las cotizaciones de la empresa (solo lectura).</p>
+        </header>
+
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
+          <div className="relative mb-5 max-w-sm">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={busquedaHistorial}
+              onChange={(e) => setBusquedaHistorial(e.target.value)}
+              placeholder="Buscar por folio, prospecto o vehículo..."
+              aria-label="Buscar en historial de cotizaciones"
+              className="w-full pl-9 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-primary/50 focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+            />
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-max text-left border-separate border-spacing-0">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+                  <th className="p-4 rounded-tl-xl whitespace-nowrap">Folio</th>
+                  <th className="p-4 whitespace-nowrap">Fecha</th>
+                  <th className="p-4 whitespace-nowrap">Prospecto</th>
+                  <th className="p-4 whitespace-nowrap">Agente Creador</th>
+                  <th className="p-4 whitespace-nowrap">Vehículo / Activo</th>
+                  <th className="p-4 whitespace-nowrap">Valor</th>
+                  <th className="p-4 whitespace-nowrap">Renta Mensual</th>
+                  <th className="p-4 rounded-tr-xl whitespace-nowrap text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {historialFiltrado.map((cot) => (
+                  <tr key={cot.id} className="transition-colors hover:bg-slate-50/80">
+                    <td className="p-4 text-xs font-mono font-bold text-slate-800 whitespace-nowrap">
+                      {folioHistorialTexto(cot.folio)}
+                    </td>
+                    <td className="p-4 text-xs text-slate-500 whitespace-nowrap">
+                      {new Date(cot.fecha_creacion).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </td>
+                    <td className="p-4 min-w-[180px] whitespace-nowrap">
+                      {cot.lead_nombre ? (
+                        <span className="font-bold text-slate-800 truncate max-w-[200px]" title={cot.lead_nombre}>{cot.lead_nombre}</span>
+                      ) : (
+                        <span className="text-slate-400 text-xs italic">Sin prospecto</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-sm font-medium text-slate-600 whitespace-nowrap">
+                      {cot.agente_nombre || 'Desconocido'}
+                    </td>
+                    <td className="p-4 min-w-[180px] max-w-[250px] whitespace-nowrap overflow-hidden text-ellipsis" title={cot.nombre_activo}>
+                      <div className="text-xs font-bold text-slate-800 truncate">{cot.nombre_activo || '-'}</div>
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">{cot.tipo_activo}</div>
+                    </td>
+                    <td className="p-4 text-sm font-bold text-primary whitespace-nowrap">{formatoMoneda(cot.valor_activo)}</td>
+                    <td className="p-4 text-sm font-black text-slate-800 whitespace-nowrap">{formatoMoneda(cot.renta_mensual_con_iva)}</td>
+                    <td className="p-4 text-center whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setDetalleCotizacion(cot)}
+                        className="px-3 py-1.5 text-xs font-bold rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        Ver / Descargar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {historial.length === 0 && (
+                  <tr>
+                    <td colSpan="8" className="p-12 text-center text-slate-400 font-medium bg-slate-50/50">
+                      Aún no hay cotizaciones guardadas en el sistema.
+                    </td>
+                  </tr>
+                )}
+                {historial.length > 0 && historialFiltrado.length === 0 && (
+                  <tr>
+                    <td colSpan="8" className="p-12 text-center text-slate-400 font-medium bg-slate-50/50">
+                      No hay cotizaciones que coincidan con tu búsqueda.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <ModalDetalleCotizacion
+          abierto={Boolean(detalleCotizacion)}
+          onCerrar={() => setDetalleCotizacion(null)}
+          cotizacionInicial={detalleCotizacion}
+          cotizacionId={detalleCotizacion?.id}
+          prospectoNombre={detalleCotizacion?.lead_nombre}
+          agenteNombre={detalleCotizacion?.agente_nombre}
+          onGenerarPdf={handleGenerarPdfDetalle}
+          generandoPdf={generandoPdfDetalle}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="font-sans max-w-7xl mx-auto pb-20">
       <header className="mb-8 flex justify-between items-center">

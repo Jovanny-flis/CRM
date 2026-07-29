@@ -397,7 +397,7 @@ CALL crm_add_column_if_missing('cotizaciones', 'rentas_deposito_valor',
 
 
 -- Modificar el ENUM de roles en usuarios
-ALTER TABLE usuarios MODIFY COLUMN rol ENUM('super_admin', 'admin_empresa', 'supervisor', 'agente', 'agente_cotizador') DEFAULT 'agente';
+ALTER TABLE usuarios MODIFY COLUMN rol ENUM('super_admin', 'admin_empresa', 'supervisor', 'agente', 'agente_cotizador', 'riesgos') DEFAULT 'agente';
 
 -- -----------------------------------------------------------------------------
 -- 13) Cotización especial — flag y estado de autorización
