@@ -6,6 +6,7 @@ import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import ListaCotizacionesLead from '../components/ListaCotizacionesLead';
+import PanelDetalleProspectoGrouer from '../components/PanelDetalleProspectoGrouer';
 import {
   AvisoCotizacionParametrosEspeciales,
   BolitaCotizacionEspecial,
@@ -23,6 +24,11 @@ import {
   formatearFolio,
 } from '../lib/cotizacionesLead';
 import { descargarPdfPorCotizacionId } from '../lib/generarPdfCotizacion';
+import { descargarInformeGrouer } from '../lib/descargarInformeGrouer';
+import {
+  esLeadGrouerHeuristica,
+  esLeadOrigenGrouer,
+} from '../lib/prospectoGrouerDetalleVista';
 import { formatMontoEnFormulario, parseNumeroFormulario } from '../lib/cotizacionFormulario';
 import {
   cotizacionPendienteAutorizacion,
@@ -75,6 +81,12 @@ function LeadsView() {
   const [cotizacionSeleccionadaId, setCotizacionSeleccionadaId] = useState(null);
   const [desvinculandoCotizacion, setDesvinculandoCotizacion] = useState(false);
   const buscadorRef = useRef(null);
+  const detalleRequestIdRef = useRef(0);
+  const [detalleGrouer, setDetalleGrouer] = useState(null);
+  const [cargandoDetalleGrouer, setCargandoDetalleGrouer] = useState(false);
+  const [errorDetalleGrouer, setErrorDetalleGrouer] = useState('');
+  const [descargandoPdfGrouer, setDescargandoPdfGrouer] = useState(false);
+  const [errorPdfGrouer, setErrorPdfGrouer] = useState('');
   
   const [formData, setFormData] = useState({
     nombre: '', 
@@ -191,6 +203,12 @@ function LeadsView() {
     setSugerenciasCotizaciones([]);
     setCotizacionesVinculadas([]);
     setCotizacionSeleccionadaId(null);
+    detalleRequestIdRef.current += 1;
+    setDetalleGrouer(null);
+    setCargandoDetalleGrouer(false);
+    setErrorDetalleGrouer('');
+    setDescargandoPdfGrouer(false);
+    setErrorPdfGrouer('');
   };
 
   const cargarCotizacionesLead = async (leadId) => {
@@ -225,6 +243,8 @@ function LeadsView() {
   const esLeadCancelado = (lead) => lead.estatus_codigo === CODIGO_CANCELADO;
   const esLeadMovible = (lead) => !esLeadCancelado(lead) && (lead.estatus_permite_mover === 1 || lead.estatus_permite_mover === true);
   const esLeadEditable = (lead) => !esLeadCancelado(lead);
+  const esFichaLeadEditable = (lead, detalle) =>
+    esLeadEditable(lead) && !esLeadOrigenGrouer(lead, detalle);
   const incluyeEnSuma = (lead) => lead.estatus_incluir_en_suma === 1 || lead.estatus_incluir_en_suma === true;
 
   const bloqueaCotizacionEnModal = () => {
@@ -318,6 +338,61 @@ function LeadsView() {
     }
   };
 
+  const cargarDetalleLead = (leadCompleto) => {
+    const leadId = leadCompleto?.id;
+    if (!leadId) {
+      setDetalleGrouer(null);
+      setCargandoDetalleGrouer(false);
+      setErrorDetalleGrouer('');
+      return;
+    }
+
+    const requestId = ++detalleRequestIdRef.current;
+    const eraHeuristicaGrouer = esLeadGrouerHeuristica(leadCompleto);
+    setCargandoDetalleGrouer(true);
+    setErrorDetalleGrouer('');
+    setDetalleGrouer(null);
+    setErrorPdfGrouer('');
+
+    api.get(`/leads/${leadId}/detalle`)
+      .then((res) => {
+        if (requestId !== detalleRequestIdRef.current) return;
+        const data = res.data || {};
+        setDetalleGrouer(data);
+        if (data.origen === 'grouer') {
+          setCotizacionesVinculadas([]);
+          setCotizacionSeleccionadaId(null);
+          setMostrarBuscadorCotizacion(false);
+          setModalDetalleCotizacionAbierto(false);
+        } else if (eraHeuristicaGrouer) {
+          cargarCotizacionesLead(leadId);
+        }
+      })
+      .catch((err) => {
+        if (requestId !== detalleRequestIdRef.current) return;
+        console.error('Error al cargar detalle del lead:', err);
+        setErrorDetalleGrouer('No se pudo cargar el detalle del prospecto.');
+        setDetalleGrouer(null);
+      })
+      .finally(() => {
+        if (requestId === detalleRequestIdRef.current) setCargandoDetalleGrouer(false);
+      });
+  };
+
+  const handleDescargarInformeGrouer = async () => {
+    if (!leadEditando?.id || descargandoPdfGrouer) return;
+    if (!detalleGrouer?.pdf_disponible) return;
+    setDescargandoPdfGrouer(true);
+    setErrorPdfGrouer('');
+    try {
+      await descargarInformeGrouer(leadEditando.id);
+    } catch (err) {
+      setErrorPdfGrouer(err.message || 'No se pudo descargar el informe GROUER.');
+    } finally {
+      setDescargandoPdfGrouer(false);
+    }
+  };
+
   const estatusCanceladoId = estatusList.find((e) => e.codigo === CODIGO_CANCELADO)?.id;
   const vaACancelarEnFormulario = formData.estatus_id && String(formData.estatus_id) === String(estatusCanceladoId);
 
@@ -334,7 +409,14 @@ function LeadsView() {
 
   const cargarDatosAlModal = (leadCompleto) => {
     setLeadEditando(leadCompleto);
-    cargarCotizacionesLead(leadCompleto.id);
+    const esGrouer = esLeadGrouerHeuristica(leadCompleto);
+    if (esGrouer) {
+      setCotizacionesVinculadas([]);
+      setCotizacionSeleccionadaId(null);
+    } else {
+      cargarCotizacionesLead(leadCompleto.id);
+    }
+    cargarDetalleLead(leadCompleto);
     setFormData({
       nombre: leadCompleto.nombre || '',
       correo: leadCompleto.correo || '',
@@ -354,7 +436,7 @@ function LeadsView() {
     setMostrarAvisoCancelacion(false);
     setIsModalOpen(true);
     const congelaFolio = leadBloqueaCotizacion(leadCompleto);
-    setMostrarBuscadorCotizacion(!congelaFolio && !leadTieneCotizacionesVinculadas(leadCompleto));
+    setMostrarBuscadorCotizacion(!esGrouer && !congelaFolio && !leadTieneCotizacionesVinculadas(leadCompleto));
   };
 
   const handleCambioEstatus = (nuevoEstatusId) => {
@@ -503,6 +585,30 @@ function LeadsView() {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (modoSoloLectura) return;
+
+    if (leadEditando && esLeadOrigenGrouer(leadEditando, detalleGrouer)) {
+      if (vaACancelarEnFormulario && !motivoDesactivacion.trim()) {
+        alert('Indica el motivo de cancelación antes de guardar.');
+        return;
+      }
+      if (!vaACancelarEnFormulario) {
+        alert('Este prospecto proviene de GROUER. Solo puedes cancelarlo o moverlo de etapa en el tablero.');
+        return;
+      }
+      api.put(`/leads/${leadEditando.id}`, {
+        estatus_id: formData.estatus_id,
+        motivo_desactivacion: motivoDesactivacion.trim(),
+      })
+        .then(() => {
+          fetchTablero();
+          cerrarModal();
+        })
+        .catch((err) => {
+          const msg = err.response?.data?.error || err.message;
+          alert('Error al actualizar: ' + msg);
+        });
+      return;
+    }
 
     const tieneCotizacion = cotizacionesVinculadas.length > 0 || leadTieneCotizacionesVinculadas(leadEditando);
     const valorNumerico = tieneCotizacion
@@ -658,6 +764,10 @@ function LeadsView() {
   const cancelarMovimientoEtapa = () => {
     setConfirmacionMovimiento(null);
   };
+
+  const leadEsGrouer = esLeadOrigenGrouer(leadEditando, detalleGrouer);
+  const fichaBloqueada = modoSoloLectura
+    || Boolean(leadEditando && !esFichaLeadEditable(leadEditando, detalleGrouer));
 
   if (cargando) return <div className="p-10 text-center text-slate-500 font-medium">Cargando tablero...</div>;
 
@@ -1032,14 +1142,18 @@ function LeadsView() {
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
                   {modoSoloLectura && <Eye className="text-slate-400" size={24} />}
-                  {leadEditando ? (modoSoloLectura ? 'Detalles del Prospecto' : 'Editar Prospecto') : 'Nuevo Prospecto'}
+                  {leadEditando
+                    ? (leadEsGrouer
+                      ? 'Prospecto GROUER'
+                      : (modoSoloLectura ? 'Detalles del Prospecto' : 'Editar Prospecto'))
+                    : 'Nuevo Prospecto'}
                 </h2>
                 <button onClick={cerrarModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-100 hover:bg-slate-200 rounded-full p-2">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
               </div>
 
-              {leadEditando && leadTieneCotizacionEspecial(leadEditando) && (
+              {leadEditando && !leadEsGrouer && leadTieneCotizacionEspecial(leadEditando) && (
                 <AvisoCotizacionParametrosEspeciales className="mb-6" />
               )}
 
@@ -1054,7 +1168,7 @@ function LeadsView() {
                         type="text" required 
                         value={formData.nombre} 
                         onChange={(e) => setFormData({...formData, nombre: e.target.value})} 
-                        disabled={modoSoloLectura}
+                        disabled={fichaBloqueada}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                         placeholder="Ej. Juan Pérez" 
                       />
@@ -1065,7 +1179,7 @@ function LeadsView() {
                       <select
                         value={formData.tipo_persona}
                         onChange={(e) => setFormData({ ...formData, tipo_persona: e.target.value })}
-                        disabled={modoSoloLectura}
+                        disabled={fichaBloqueada}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none font-medium text-slate-800 transition-all"
                       >
                         {OPCIONES_TIPO_PERSONA.map((op) => (
@@ -1081,7 +1195,7 @@ function LeadsView() {
                           type="email" 
                           value={formData.correo} 
                           onChange={(e) => setFormData({...formData, correo: e.target.value})} 
-                          disabled={modoSoloLectura}
+                          disabled={fichaBloqueada}
                           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                           placeholder="juan@mail.com" 
                         />
@@ -1092,7 +1206,7 @@ function LeadsView() {
                           type="text" 
                           value={formData.telefono} 
                           onChange={(e) => setFormData({...formData, telefono: e.target.value})} 
-                          disabled={modoSoloLectura}
+                          disabled={fichaBloqueada}
                           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all" 
                           placeholder="5512345678" 
                         />
@@ -1101,7 +1215,7 @@ function LeadsView() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${modoSoloLectura ? 'text-slate-500' : 'text-green-600'}`}>
+                        <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${fichaBloqueada ? 'text-slate-500' : 'text-green-600'}`}>
                           {leadTieneCotizacionesVinculadas(leadEditando) ? 'Valor total (cotizaciones)' : 'Valor Estimado ($) *'}
                         </label>
                         <input 
@@ -1113,12 +1227,12 @@ function LeadsView() {
                             ...formData,
                             valor: formatMontoEnFormulario(e.target.value),
                           })} 
-                          disabled={modoSoloLectura || leadTieneCotizacionesVinculadas(leadEditando)}
-                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold transition-all ${modoSoloLectura || leadTieneCotizacionesVinculadas(leadEditando) ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
+                          disabled={fichaBloqueada || leadTieneCotizacionesVinculadas(leadEditando)}
+                          className={`w-full border rounded-xl px-4 py-3 outline-none font-bold transition-all ${fichaBloqueada || leadTieneCotizacionesVinculadas(leadEditando) ? 'bg-slate-100 border-transparent text-slate-600' : 'bg-green-50 border-green-200 focus:bg-white focus:border-green-500 text-green-700'}`} 
                           placeholder="Ej. 350,000" 
                         />
                       </div>
-                      <div className={modoSoloLectura ? "pointer-events-none opacity-80" : ""}>
+                      <div className={fichaBloqueada ? "pointer-events-none opacity-80" : ""}>
                         <SelectorCanales
                           empresaId={empresaId}
                           value={formData.medio}
@@ -1128,6 +1242,12 @@ function LeadsView() {
                         />
                       </div>
                     </div>
+
+                    {leadEsGrouer && (
+                      <p className="text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                        Lead de plataforma GROUER. Nombre, teléfono, canal y valor son de solo lectura. Puedes cancelar el prospecto o moverlo de columna en el tablero.
+                      </p>
+                    )}
 
                     {leadEditando && (
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
@@ -1174,7 +1294,7 @@ function LeadsView() {
                         <select 
                           value={formData.usuario_id} 
                           onChange={(e) => setFormData({...formData, usuario_id: e.target.value})} 
-                          disabled={modoSoloLectura}
+                          disabled={fichaBloqueada}
                           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 appearance-none font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent transition-all"
                         >
                           <option value="">Sin asignar</option>
@@ -1187,20 +1307,45 @@ function LeadsView() {
                       </div>
                     )}
 
-                    {!modoSoloLectura && (
+                    {!modoSoloLectura && (!leadEsGrouer || vaACancelarEnFormulario) && (
                       <div className="pt-6 flex gap-4">
                         <button type="submit" className="w-full py-4 bg-primary text-white font-bold rounded-xl hover:brightness-95 shadow-sm transition-all text-lg">
-                          {leadEditando ? '💾 Guardar Cambios' : 'Crear Prospecto'}
+                          {leadEditando
+                            ? (leadEsGrouer ? 'Guardar cancelación' : '💾 Guardar Cambios')
+                            : 'Crear Prospecto'}
                         </button>
                       </div>
                     )}
                   </form>
                 </div>
 
-                {/* COLUMNA DERECHA: Cotización y Buscador Inteligente */}
+                {/* COLUMNA DERECHA: panel GROUER o cotizaciones FL */}
                 {leadEditando && (
-                  <div className="flex flex-col h-full bg-slate-50 rounded-2xl p-6 border border-slate-200 relative">
-                    
+                  <div className={`flex flex-col h-full rounded-2xl border relative min-h-0 ${leadEsGrouer ? 'bg-transparent border-transparent p-0' : 'bg-slate-50 p-6 border-slate-200'}`}>
+                    {leadEsGrouer ? (
+                      <>
+                        {cargandoDetalleGrouer && (
+                          <div className="bg-[#141414] rounded-2xl p-12 text-center text-slate-400 text-sm font-medium border border-slate-800 animate-pulse flex-1">
+                            Cargando detalle…
+                          </div>
+                        )}
+                        {!cargandoDetalleGrouer && errorDetalleGrouer && (
+                          <div className="bg-[#141414] rounded-2xl p-8 text-center text-red-300 text-sm font-medium border border-red-900/40 flex-1">
+                            {errorDetalleGrouer}
+                          </div>
+                        )}
+                        {!cargandoDetalleGrouer && !errorDetalleGrouer && (
+                          <PanelDetalleProspectoGrouer
+                            snapshot={detalleGrouer?.snapshot}
+                            pdfDisponible={Boolean(detalleGrouer?.pdf_disponible)}
+                            onDescargarPdf={handleDescargarInformeGrouer}
+                            descargandoPdf={descargandoPdfGrouer}
+                            errorPdf={errorPdfGrouer}
+                          />
+                        )}
+                      </>
+                    ) : (
+                    <>
                     <div className="flex justify-between items-start mb-4 gap-3">
                       <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
                         <FileText className="text-[#ea5533]" size={20} />
@@ -1478,6 +1623,8 @@ function LeadsView() {
                         )}
                       </div>
                     )}
+                    </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1488,7 +1635,7 @@ function LeadsView() {
       )}
 
       <ModalDetalleCotizacion
-        abierto={modalDetalleCotizacionAbierto && Boolean(cotizacionSeleccionadaId)}
+        abierto={modalDetalleCotizacionAbierto && Boolean(cotizacionSeleccionadaId) && !leadEsGrouer}
         onCerrar={() => setModalDetalleCotizacionAbierto(false)}
         cotizacionId={cotizacionSeleccionadaId}
         prospectoNombre={leadEditando?.nombre}
