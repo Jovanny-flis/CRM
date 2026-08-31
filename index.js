@@ -48,6 +48,7 @@ const { listarCatalogoGpsEmpresa, precioGpsValido } = require('./lib/gps-catalog
 const reporteMaestro = require('./lib/reporteMaestro');
 const dashboardKpis = require('./lib/dashboard-kpis');
 const comisiones = require('./lib/comisiones');
+const integracionesGrouer = require('./lib/integraciones-grouer');
 const {
     generarPdfDesdeFormulario,
     generarPdfDesdeCotizacion,
@@ -85,7 +86,7 @@ const origenesPermitidos = [
 app.use(cors({
     origin: origenesPermitidos,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Grouer-Token'],
     exposedHeaders: ['Content-Disposition'],
     credentials: true
 }));
@@ -94,6 +95,7 @@ app.use(express.json());
 app.use(reporteMaestro);
 app.use(dashboardKpis);
 app.use(comisiones);
+app.use(integracionesGrouer);
 
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
 // super_admin pasa siempre. El resto debe coincidir con su empresa_id.
@@ -868,18 +870,17 @@ app.put('/api/leads/:id',
             return res.status(400).json({ error: 'No se puede editar un lead cancelado.' });
         }
 
+        const [origenGrouer] = await db.query(
+            'SELECT lead_id FROM leads_origen_grouer WHERE lead_id = ? LIMIT 1',
+            [id],
+        );
+        const esOrigenGrouer = origenGrouer.length > 0;
+
         const tipoPersonaNormalizado = normalizarTipoPersona(
             tipo_persona !== undefined ? tipo_persona : leadActual.tipo_persona,
         );
         if (tipoPersonaNormalizado && typeof tipoPersonaNormalizado === 'object' && tipoPersonaNormalizado.error) {
             return res.status(400).json({ error: tipoPersonaNormalizado.error });
-        }
-
-        const valorCotizacion = await obtenerSumaValorCotizacionesLead(db, id);
-        const valorAGuardar = valorCotizacion != null ? valorCotizacion : valor;
-
-        if (valorCotizacion == null && !valorEstimadoValido(valor)) {
-            return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
         }
 
         const estatusObjetivoId = estatus_id || leadActual.estatus_id;
@@ -893,6 +894,32 @@ app.put('/api/leads/:id',
 
         const estatusObjetivo = filasEstatus[0];
         const pasaACancelado = estatusObjetivo.codigo === CODIGO_CANCELADO;
+
+        if (esOrigenGrouer) {
+            if (pasaACancelado) {
+                const motivo = (motivo_desactivacion || '').trim();
+                if (!motivo) {
+                    return res.status(400).json({ error: 'El motivo de cancelación es obligatorio.' });
+                }
+                await db.query(
+                    `UPDATE leads
+                     SET estatus_id = ?, motivo_desactivacion = ?, desactivado_at = CURRENT_TIMESTAMP, activo = 0
+                     WHERE id = ?`,
+                    [estatusObjetivo.id, motivo, id],
+                );
+                return res.status(200).json({ mensaje: 'Lead cancelado con éxito' });
+            }
+            return res.status(400).json({
+                error: 'Este prospecto proviene de GROUER y su ficha no se puede editar.',
+            });
+        }
+
+        const valorCotizacion = await obtenerSumaValorCotizacionesLead(db, id);
+        const valorAGuardar = valorCotizacion != null ? valorCotizacion : valor;
+
+        if (valorCotizacion == null && !valorEstimadoValido(valor)) {
+            return res.status(400).json({ error: 'El valor estimado es obligatorio y debe ser mayor a cero.' });
+        }
 
         if (pasaACancelado) {
             const motivo = (motivo_desactivacion || '').trim();

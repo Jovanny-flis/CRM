@@ -227,6 +227,8 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 
 8. Dar de alta usuarios en Firebase Auth y filas en `usuarios` con `firebase_uid` coherente (el alta vía API crea ambos). Para un `super_admin` inicial, seguir el bloque comentado al final de `db/schema.sql` y la consola de Firebase según el procedimiento del equipo.
 
+    Semilla **GROUER** (empresa/pipeline local, usuario técnico `Sistema GROUER` y canal `Portal GROUER`): ver [`scripts/README-seed-grouer.md`](scripts/README-seed-grouer.md). El humano crea el user en Firebase Auth, pega `GROUER_ROBOT_FIREBASE_UID` en `.env` y corre `npm run seed:grouer-local`. En prod **no** se crea empresa/pipeline/etapas: pega el `GROUER_EMPRESA_ID` que **ya existe** y corre `npm run seed:grouer-prod-robot`. Las rutas inbound ya están en `lib/integraciones-grouer.js`.
+
 9. Arrancar el backend:
    ```bash
    node index.js
@@ -256,8 +258,12 @@ La credencial de Firebase Admin debe proporcionarse como `firebase-key.json` en 
 | `EMAIL_PORT` | Puerto SMTP |
 | `EMAIL_USER` | Usuario SMTP |
 | `EMAIL_PASS` | Contraseña SMTP |
-| `CORS_ORIGINS` | Orígenes del navegador autorizados para llamar a la API, separados por comas. Si está vacía o ausente, no se admite ningún origen en peticiones cross-origin. |
+| `CORS_ORIGINS` | Orígenes del navegador autorizados para llamar a la API, separados por comas. Si está vacía o ausente, no se admite ningún origen en peticiones cross-origin. **No** incluir `grouer.com.mx`: el browser del operador llama al CRM, no a la API GROUER. |
 | `FRONTEND_BASE_URL` | Base del frontend para enlaces absolutos (p. ej. `http://localhost:5173`). Usada en el correo de **cotización especial** (`/leads`). Otros flujos (bienvenida de usuario) pueden seguir URLs fijas en código (ver Deuda técnica). |
+| `GROUER_EMPRESA_ID` | Id de la empresa `nombre_comercial = GROUER` en este CRM. En local lo imprime la semilla; en prod pega el id **ya existente**. No en git. |
+| `GROUER_CRM_SHARED_TOKEN` | Secreto compartido con la API GROUER (inbound `X-Grouer-Token`; proxy PDF `X-Crm-Token`). Vacío = 503 en inbound y proxy. |
+| `GROUER_API_URL` | Base de la API GROUER para el proxy PDF. Local: `http://127.0.0.1:3000`. Prod (red `grouer-crm`): `http://api:3000`. Fallback HTTPS: `https://api.grouer.com.mx`. Vacío = 503. El CRM **no** llama a riesgos. |
+| `GROUER_ROBOT_FIREBASE_UID` | UID de Auth del usuario técnico `Sistema GROUER` (user nuevo; no el MAIN). |
 
 ### Frontend (`frontend/.env`)
 
@@ -495,6 +501,30 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 | POST | `/medios` | mismos | `empresa_id` del body; cualquier usuario autenticado puede CRUD |
 | PUT | `/medios/:id` | mismos | `validarRecursoEmpresa` (empresa del canal) |
 | DELETE | `/medios/:id` | mismos | `validarRecursoEmpresa`; no modifica `leads.medio` histórico |
+| GET | `/leads/:id/detalle` | `verificarToken` + `validarRecursoEmpresa` | Detalle de prospecto; si hay fila en `leads_origen_grouer`, incluye `origen: 'grouer'` y el snapshot curado. Router: `lib/integraciones-grouer.js`. |
+| GET | `/leads/:id/informe-grouer.pdf` | `verificarToken` + `validarRecursoEmpresa` | Proxy PDF: operador → CRM → GROUER `GET /api/analisis-riesgo/:id/informe.pdf` con `X-Crm-Token`. 409 si no hay PDF. El CRM no llama a riesgos. |
+
+### Integración GROUER (auth máquina `X-Grouer-Token`)
+
+Router `lib/integraciones-grouer.js`. Empresa siempre = `GROUER_EMPRESA_ID` (no se toma del body). Token = `GROUER_CRM_SHARED_TOKEN`. El canal `Portal GROUER` es raíz extra **solo** de la empresa GROUER (semilla); no forma parte de `CANALES_RAIZ`.
+
+| Método | Endpoint | Protección | Descripción |
+| ------ | -------- | ---------- | ----------- |
+| POST | `/integraciones/grouer/prospectos` | `verificarTokenGrouer` | Alta inbound. 201 creado / 200 duplicado. |
+| POST | `/integraciones/grouer/prospectos/:solicitud_id/cancelar` | `verificarTokenGrouer` | Si no hay lead: 200 `{ ok, existia: false }` (no-op). Si existe: estatus `cancelado`, motivo `canceló en portal`, `activo` legado = 0. Idempotente si ya estaba cancelado. UUID inválido → 400. No crea lead ni toca cotizaciones. |
+
+**Red Docker `grouer-crm` (prod):** crear **antes** del compose up si no existe (`sudo docker network create grouer-crm`). El compose de `CRM/deploy/` ya publica el backend con alias `crm-backend`. No editar compose solo en el servidor. No `down -v`.
+
+Checklist `CRM/.env` en el VPS (el humano pega secretos; detalle en [`scripts/README-seed-grouer.md`](scripts/README-seed-grouer.md)):
+
+| Variable | Valor prod |
+|---|---|
+| `GROUER_EMPRESA_ID` | Id ya existente (`SELECT` de empresa GROUER) |
+| `GROUER_CRM_SHARED_TOKEN` | El mismo que en `api/.env` de GROUER |
+| `GROUER_API_URL` | `http://api:3000` |
+| `GROUER_ROBOT_FIREBASE_UID` | UID Auth del user técnico nuevo; no el MAIN |
+
+**CORS:** no hace falta `grouer.com.mx` en `CORS_ORIGINS` del CRM.
 
 **Catálogo de canales (`lead_sources`):**
 
@@ -502,7 +532,8 @@ En la interfaz la sección se llama **Canales**; en base de datos y API se manti
 - Jerarquía opcional con `parent_id` (subcanales). Al eliminar un canal padre, sus subcanales se eliminan en cascada (`ON DELETE CASCADE`).
 - El valor persistido en el lead es el **nombre** del canal o subcanal elegido (`leads.medio`), no el UUID del catálogo. Eliminar un canal del catálogo no altera el texto ya guardado en leads.
 - **Default:** `Contacto directo` (`MEDIO_DEFAULT` en `lib/canales.js` y `SelectorCanales.jsx`). Al crear/editar un lead sin selección explícita se persiste ese valor.
-- **Catálogo raíz estándar** (9 canales, iguales para todas las empresas): Referidos de clientes, Marketing digital, Socios, Agentes, Eventos empresariales, Concesionarios, Webinars, Contacto directo, Cotizador. Definido en `lib/canales.js`.
+- **Catálogo raíz estándar** (9 canales, iguales para todas las empresas): Referidos de clientes, Marketing digital, Socios, Agentes, Eventos empresariales, Concesionarios, Webinars, Contacto directo, Cotizador. Definido en `lib/canales.js` (`CANALES_RAIZ`).
+- **Portal GROUER**: canal raíz extra, **solo** empresa GROUER (semilla local / `seed:grouer-prod-robot`). No forma parte de `CANALES_RAIZ`.
 - **Subcanales:** no se siembran en migración ni en semilla automática del backend. Cada empresa los crea desde el front:
   - Botón **Nuevo** (pie del combobox): canal raíz.
   - Menú ⋮ de un canal raíz → **Nuevo subcanal**: alta bajo ese padre.

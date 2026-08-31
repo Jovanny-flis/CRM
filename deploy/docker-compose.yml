@@ -1,3 +1,12 @@
+# CRM FLISING — producción VPS + Traefik.
+# Red grouer-crm (external, una vez en el VPS): sudo docker network create grouer-crm
+# El servicio backend se publica en esa red como alias crm-backend (puerto 3000).
+# GROUER api/.env: CRM_INGEST_URL=http://crm-backend:3000
+# CRM .env: GROUER_API_URL=http://api:3000  (hostname del servicio GROUER en la misma red)
+# Fallback HTTPS si no se crea la red: https://api.grouer.com.mx / https://api.flising.cloud
+# El CRM no se une a grouer-internal (no debe llamar a riesgos:8000).
+# No compartir MariaDB con GROUER.
+
 services:
   db:
     image: mariadb:11
@@ -24,8 +33,11 @@ services:
     volumes:
       - ../firebase-key.json:/app/firebase-key.json:ro
     networks:
-      - crm-internal
-      - traefik-proxy
+      crm-internal:
+      traefik-proxy:
+      grouer-crm:
+        aliases:
+          - crm-backend
     labels:
       - traefik.enable=true
       - traefik.http.routers.crm-api.rule=Host(`api.flising.cloud`)
@@ -61,6 +73,9 @@ networks:
     driver: bridge
   traefik-proxy:
     external: true
+  grouer-crm:
+    external: true
+    name: grouer-crm
 
 volumes:
   crm_db_data:
