@@ -6,6 +6,7 @@ import {
   Handshake,
   MapPin,
   Package,
+  Send,
   Shield,
   User,
 } from 'lucide-react';
@@ -69,9 +70,15 @@ function PanelDetalleProspectoGrouer({
   onDescargarPdf,
   descargandoPdf = false,
   errorPdf = '',
+  onEnviarFlising,
+  enviandoFlising = false,
+  yaEnviado = false,
+  agenteFlisingNombre = '',
+  errorEnvio = '',
 }) {
   const { grupos } = construirFilasDetalleProspectoGrouer(snapshot);
   const puedePdf = Boolean(pdfDisponible) && typeof onDescargarPdf === 'function';
+  const puedeEnviar = typeof onEnviarFlising === 'function' && !yaEnviado;
 
   return (
     <div className="bg-[#141414] text-white rounded-2xl shadow-xl border border-slate-800 relative overflow-hidden flex flex-col min-h-0 flex-1 max-h-[75vh]">
@@ -129,11 +136,40 @@ function PanelDetalleProspectoGrouer({
         })}
       </div>
 
-      <div className="relative px-5 py-4 border-t border-white/10 bg-black/40 shrink-0">
+      <div className="relative px-5 py-4 border-t border-white/10 bg-black/40 shrink-0 space-y-3">
         {errorPdf && (
-          <p className="mb-3 text-xs font-medium text-red-300 bg-red-950/40 border border-red-900/40 rounded-lg px-3 py-2">
+          <p className="text-xs font-medium text-red-300 bg-red-950/40 border border-red-900/40 rounded-lg px-3 py-2">
             {errorPdf}
           </p>
+        )}
+        {errorEnvio && (
+          <p className="text-xs font-medium text-red-300 bg-red-950/40 border border-red-900/40 rounded-lg px-3 py-2">
+            {errorEnvio}
+          </p>
+        )}
+        {yaEnviado && (
+          <p className="text-xs font-medium text-sky-200 bg-sky-950/40 border border-sky-800/40 rounded-lg px-3 py-2">
+            Enviado a Flising{agenteFlisingNombre ? ` · ${agenteFlisingNombre}` : ''}. El prospecto permanece en esta columna.
+          </p>
+        )}
+        {typeof onEnviarFlising === 'function' && (
+          <button
+            type="button"
+            onClick={puedeEnviar && !enviandoFlising ? onEnviarFlising : undefined}
+            disabled={!puedeEnviar || enviandoFlising}
+            className={`w-full py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+              puedeEnviar && !enviandoFlising
+                ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-sky-600/30'
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+            }`}
+          >
+            <Send size={18} />
+            {enviandoFlising
+              ? 'Enviando…'
+              : yaEnviado
+                ? 'Enviado a Flising'
+                : 'Enviar a Flising'}
+          </button>
         )}
         <button
           type="button"

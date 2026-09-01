@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test lib/*.test.js",
     "seed:grouer-local": "node scripts/seed-grouer-local.js",
     "seed:grouer-prod-robot": "node scripts/seed-grouer-prod-robot-canal.js"
   },
