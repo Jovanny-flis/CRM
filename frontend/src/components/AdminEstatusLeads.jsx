@@ -5,12 +5,14 @@ import { MoreVertical } from 'lucide-react';
 const CODIGO_ACTIVO = 'activo';
 const CODIGO_CANCELADO = 'cancelado';
 const CODIGO_PENDIENTE_AUTORIZACION = 'pendiente_autorizacion';
+const CODIGO_ENVIADO_A_FLISING = 'enviado_a_flising';
 const UMBRAL_ARRASTRE = 8;
 
 const esSistema = (e) =>
   e.codigo === CODIGO_ACTIVO
   || e.codigo === CODIGO_CANCELADO
   || e.codigo === CODIGO_PENDIENTE_AUTORIZACION
+  || e.codigo === CODIGO_ENVIADO_A_FLISING
   || e.es_sistema === 1
   || e.es_sistema === true;
 
@@ -77,6 +79,7 @@ function AdminEstatusLeads({ empresaId }) {
 
   const activo = estatus.find((e) => e.codigo === CODIGO_ACTIVO);
   const pendienteAutorizacion = estatus.find((e) => e.codigo === CODIGO_PENDIENTE_AUTORIZACION);
+  const enviadoAFlising = estatus.find((e) => e.codigo === CODIGO_ENVIADO_A_FLISING);
   const cancelado = estatus.find((e) => e.codigo === CODIGO_CANCELADO);
 
   const reordenarLocal = (fromId, toId) => {
@@ -293,6 +296,7 @@ function AdminEstatusLeads({ empresaId }) {
   const esActivo = editando?.codigo === CODIGO_ACTIVO;
   const esCancelado = editando?.codigo === CODIGO_CANCELADO;
   const esPendienteAutorizacion = editando?.codigo === CODIGO_PENDIENTE_AUTORIZACION;
+  const esEnviadoAFlising = editando?.codigo === CODIGO_ENVIADO_A_FLISING;
   const esPersonalizado = editando && !esSistema(editando);
 
   if (!empresaId) {
@@ -311,13 +315,14 @@ function AdminEstatusLeads({ empresaId }) {
         <h3 className="font-black text-slate-800 text-lg mb-1">Estatus de prospectos</h3>
         <p className="text-sm text-slate-500">
           Mantén presionado el icono de menú y arrastra para reordenar estatus personalizados.
-          Activo, Pendiente de autorización y Cancelado son obligatorios (solo renombrables).
+          Activo, Pendiente de autorización, Enviado a Flising (solo GROUER) y Cancelado son de sistema.
         </p>
       </div>
 
       <div className="space-y-2">
         {activo && filaEstatus(activo)}
         {personalizadosOrden.map((item) => filaEstatus(item, { esArrastrable: true }))}
+        {enviadoAFlising && filaEstatus(enviadoAFlising)}
         {pendienteAutorizacion && filaEstatus(pendienteAutorizacion)}
         {cancelado && filaEstatus(cancelado)}
       </div>
@@ -443,6 +448,12 @@ function AdminEstatusLeads({ empresaId }) {
                 {esPendienteAutorizacion && (
                   <p className="text-xs text-slate-400">
                     Pendiente de autorización usa color fijo (ámbar), aparece en la suma del bin, no permite mover en el embudo y congela el folio asignado hasta aceptar o rechazar la cotización especial.
+                  </p>
+                )}
+
+                {esEnviadoAFlising && (
+                  <p className="text-xs text-slate-400">
+                    Enviado a Flising es solo de la empresa GROUER. El prospecto se queda en su columna; la copia en FLISING es un lead tradicional.
                   </p>
                 )}
 

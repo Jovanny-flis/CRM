@@ -2,10 +2,11 @@
 
 export const MEDIO_PORTAL_GROUER = 'Portal GROUER';
 export const ORIGEN_GROUER = 'grouer';
+export const CODIGO_ENVIADO_A_FLISING = 'enviado_a_flising';
 export const SIN_DATO = 'sin dato';
 
 export const esLeadGrouerHeuristica = (lead) =>
-  Boolean(lead && lead.medio === MEDIO_PORTAL_GROUER);
+  Boolean(lead && (lead.origen_grouer === 1 || lead.origen_grouer === true || lead.medio === MEDIO_PORTAL_GROUER));
 
 /** Confirmado por GET detalle (`origen`); si aún no llega, usa el canal del tablero. */
 export const esLeadOrigenGrouer = (lead, detalle) => {
@@ -13,6 +14,19 @@ export const esLeadOrigenGrouer = (lead, detalle) => {
     return detalle.origen === ORIGEN_GROUER;
   }
   return esLeadGrouerHeuristica(lead);
+};
+
+export const leadYaEnviadoAFlising = (lead, detalle) => {
+  const src = detalle && lead && detalle.id === lead.id ? detalle : lead;
+  if (!src) return false;
+  if (src.flising_lead_id) return true;
+  if (src.estatus_codigo === CODIGO_ENVIADO_A_FLISING) return true;
+  return false;
+};
+
+export const nombreAgenteFlisingAsignado = (lead, detalle) => {
+  const src = detalle && lead && detalle.id === lead.id ? detalle : lead;
+  return src?.agente_flising_nombre || '';
 };
 
 export const formatoMonedaGrouer = (monto) =>

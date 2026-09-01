@@ -21,6 +21,7 @@ const {
     CODIGO_ACTIVO,
     CODIGO_CANCELADO,
     CODIGO_PENDIENTE_AUTORIZACION,
+    CODIGO_ENVIADO_A_FLISING,
     ORDEN_CANCELADO,
     asegurarCatalogoEstatus,
     obtenerEstatusInicial,
@@ -49,6 +50,8 @@ const reporteMaestro = require('./lib/reporteMaestro');
 const dashboardKpis = require('./lib/dashboard-kpis');
 const comisiones = require('./lib/comisiones');
 const integracionesGrouer = require('./lib/integraciones-grouer');
+const envioFlising = require('./lib/envio-flising');
+const { cancelarClonSiExiste } = envioFlising;
 const {
     generarPdfDesdeFormulario,
     generarPdfDesdeCotizacion,
@@ -96,6 +99,7 @@ app.use(reporteMaestro);
 app.use(dashboardKpis);
 app.use(comisiones);
 app.use(integracionesGrouer);
+app.use(envioFlising);
 
 // Helper: ¿el usuario autenticado puede operar sobre recursos de esta empresa?
 // super_admin pasa siempre. El resto debe coincidir con su empresa_id.
@@ -557,8 +561,8 @@ app.post('/api/estatus-leads',
             const codigo = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
             const [rango] = await db.query(
                 `SELECT COALESCE(MAX(orden), 0) AS max_orden FROM lead_estatus
-                 WHERE empresa_id = ? AND codigo NOT IN (?, ?, ?)`,
-                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO, CODIGO_PENDIENTE_AUTORIZACION],
+                 WHERE empresa_id = ? AND codigo NOT IN (?, ?, ?, ?)`,
+                [empresa_id, CODIGO_ACTIVO, CODIGO_CANCELADO, CODIGO_PENDIENTE_AUTORIZACION, CODIGO_ENVIADO_A_FLISING],
             );
             const orden = Math.min((rango[0]?.max_orden || 0) + 1, ORDEN_CANCELADO - 1);
             const id = crypto.randomUUID();
@@ -608,7 +612,9 @@ app.put('/api/estatus-leads/:id',
             const fila = actual[0];
             const color = color_hex === '' || color_hex === 'sin_color' ? null : (color_hex ?? fila.color_hex);
 
-            if (fila.codigo === CODIGO_CANCELADO || fila.codigo === CODIGO_PENDIENTE_AUTORIZACION) {
+            if (fila.codigo === CODIGO_CANCELADO
+                || fila.codigo === CODIGO_PENDIENTE_AUTORIZACION
+                || fila.codigo === CODIGO_ENVIADO_A_FLISING) {
                 await db.query('UPDATE lead_estatus SET nombre = ? WHERE id = ?', [nombreLimpio, id]);
                 return res.status(200).json({ mensaje: 'Estatus actualizado' });
             }
@@ -746,6 +752,11 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
             e.bloquea_cotizacion as estatus_bloquea_cotizacion,
             u.nombre as agente_nombre,
             ps.nombre_etapa,
+            (og.lead_id IS NOT NULL) AS origen_grouer,
+            og.flising_lead_id,
+            og.enviado_a_flising_at,
+            og.asignado_flising_usuario_id,
+            uf.nombre AS agente_flising_nombre,
             
             (SELECT MIN(c_min.folio) FROM cotizaciones c_min WHERE c_min.lead_id = l.id) AS cotizacion_folio_min,
             (SELECT COUNT(*) FROM cotizaciones c_cnt WHERE c_cnt.lead_id = l.id) AS cotizaciones_cantidad,
@@ -774,6 +785,8 @@ app.get('/api/leads/:empresa_id', async (req, res) => {
         LEFT JOIN pipeline_stages ps ON l.stage_id = ps.id
         LEFT JOIN lead_estatus e ON l.estatus_id = e.id
         LEFT JOIN usuarios u ON l.usuario_id = u.id
+        LEFT JOIN leads_origen_grouer og ON og.lead_id = l.id
+        LEFT JOIN usuarios uf ON uf.id = og.asignado_flising_usuario_id
         LEFT JOIN cotizaciones c ON c.id = (
             SELECT c2.id FROM cotizaciones c2
             WHERE c2.lead_id = l.id
@@ -895,6 +908,13 @@ app.put('/api/leads/:id',
         const estatusObjetivo = filasEstatus[0];
         const pasaACancelado = estatusObjetivo.codigo === CODIGO_CANCELADO;
 
+        if (estatusObjetivo.codigo === CODIGO_ENVIADO_A_FLISING
+            && leadActual.estatus_codigo !== CODIGO_ENVIADO_A_FLISING) {
+            return res.status(400).json({
+                error: 'Para enviar a FLISING usa la acción Enviar a Flising, no el cambio de estatus.',
+            });
+        }
+
         if (esOrigenGrouer) {
             if (pasaACancelado) {
                 const motivo = (motivo_desactivacion || '').trim();
@@ -907,6 +927,7 @@ app.put('/api/leads/:id',
                      WHERE id = ?`,
                     [estatusObjetivo.id, motivo, id],
                 );
+                await cancelarClonSiExiste(pool, id, motivo);
                 return res.status(200).json({ mensaje: 'Lead cancelado con éxito' });
             }
             return res.status(400).json({

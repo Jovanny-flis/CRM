@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
-import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye, Plus } from 'lucide-react';
+import { Users, User, Check, ChevronDown, Search, FileText, Calendar, DollarSign, Package, Eye, Plus, Send } from 'lucide-react';
 import SelectorCanales, { MEDIO_DEFAULT } from '../components/SelectorCanales';
 import ModalDetalleCotizacion from '../components/ModalDetalleCotizacion';
 import ListaCotizacionesLead from '../components/ListaCotizacionesLead';
@@ -28,6 +28,9 @@ import { descargarInformeGrouer } from '../lib/descargarInformeGrouer';
 import {
   esLeadGrouerHeuristica,
   esLeadOrigenGrouer,
+  leadYaEnviadoAFlising,
+  nombreAgenteFlisingAsignado,
+  CODIGO_ENVIADO_A_FLISING,
 } from '../lib/prospectoGrouerDetalleVista';
 import { formatMontoEnFormulario, parseNumeroFormulario } from '../lib/cotizacionFormulario';
 import {
@@ -87,6 +90,12 @@ function LeadsView() {
   const [errorDetalleGrouer, setErrorDetalleGrouer] = useState('');
   const [descargandoPdfGrouer, setDescargandoPdfGrouer] = useState(false);
   const [errorPdfGrouer, setErrorPdfGrouer] = useState('');
+  const [envioFlisingLead, setEnvioFlisingLead] = useState(null);
+  const [agentesFlising, setAgentesFlising] = useState([]);
+  const [agenteFlisingElegido, setAgenteFlisingElegido] = useState('');
+  const [cargandoAgentesFlising, setCargandoAgentesFlising] = useState(false);
+  const [enviandoFlising, setEnviandoFlising] = useState(false);
+  const [errorEnvioFlising, setErrorEnvioFlising] = useState('');
   
   const [formData, setFormData] = useState({
     nombre: '', 
@@ -390,6 +399,53 @@ function LeadsView() {
       setErrorPdfGrouer(err.message || 'No se pudo descargar el informe GROUER.');
     } finally {
       setDescargandoPdfGrouer(false);
+    }
+  };
+
+  const cerrarModalEnvioFlising = () => {
+    if (enviandoFlising) return;
+    setEnvioFlisingLead(null);
+    setAgentesFlising([]);
+    setAgenteFlisingElegido('');
+    setErrorEnvioFlising('');
+  };
+
+  const abrirModalEnvioFlising = (leadCompleto) => {
+    if (!leadCompleto?.id || leadYaEnviadoAFlising(leadCompleto, detalleGrouer)) return;
+    setEnvioFlisingLead(leadCompleto);
+    setAgenteFlisingElegido('');
+    setErrorEnvioFlising('');
+    setCargandoAgentesFlising(true);
+    api.get(`/leads/${leadCompleto.id}/agentes-flising`)
+      .then((res) => {
+        setAgentesFlising(res.data?.agentes || []);
+      })
+      .catch((err) => {
+        setAgentesFlising([]);
+        setErrorEnvioFlising(err.response?.data?.error || err.message || 'No se pudieron cargar los agentes de FLISING.');
+      })
+      .finally(() => setCargandoAgentesFlising(false));
+  };
+
+  const confirmarEnvioFlising = async () => {
+    if (!envioFlisingLead?.id || !agenteFlisingElegido || enviandoFlising) return;
+    setEnviandoFlising(true);
+    setErrorEnvioFlising('');
+    try {
+      await api.post(`/leads/${envioFlisingLead.id}/enviar-flising`, {
+        usuario_id: agenteFlisingElegido,
+      });
+      setEnvioFlisingLead(null);
+      setAgentesFlising([]);
+      setAgenteFlisingElegido('');
+      fetchTablero();
+      if (leadEditando?.id === envioFlisingLead.id) {
+        cargarDetalleLead(envioFlisingLead);
+      }
+    } catch (err) {
+      setErrorEnvioFlising(err.response?.data?.error || err.message || 'No se pudo enviar el prospecto a FLISING.');
+    } finally {
+      setEnviandoFlising(false);
     }
   };
 
@@ -1066,6 +1122,21 @@ function LeadsView() {
                       )}
                     </div>
 
+                    {leadYaEnviadoAFlising(lead) && (
+                      <p className="mt-2 text-[10px] font-bold text-sky-800 uppercase tracking-wide">
+                        Enviado a Flising{lead.agente_flising_nombre ? ` · ${lead.agente_flising_nombre.split(' ')[0]}` : ''}
+                      </p>
+                    )}
+                    {esLeadGrouerHeuristica(lead) && !leadYaEnviadoAFlising(lead) && !cancelado && (
+                      <button
+                        type="button"
+                        onClick={() => abrirModalEnvioFlising(lead)}
+                        className="mt-2 w-full py-1.5 text-[11px] font-bold rounded-lg bg-sky-600 text-white hover:bg-sky-500 flex items-center justify-center gap-1"
+                      >
+                        <Send size={12} />
+                        Enviar a Flising
+                      </button>
+                    )}
                     {leadPendienteAutorizacion(lead) && lead.cotizacion_id && (
                       <div className="mt-3 pt-3 border-t border-amber-200/80">
                         {puedeAutorizarEspecial(usuarioLogueado) ? (
@@ -1245,7 +1316,8 @@ function LeadsView() {
 
                     {leadEsGrouer && (
                       <p className="text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-                        Lead de plataforma GROUER. Nombre, teléfono, canal y valor son de solo lectura. Puedes cancelar el prospecto o moverlo de columna en el tablero.
+                        Lead de plataforma GROUER. Nombre, teléfono, canal y valor son de solo lectura.
+                        Puedes cancelarlo, moverlo de columna o enviarlo a FLISING (el prospecto se queda en esta etapa).
                       </p>
                     )}
 
@@ -1261,7 +1333,12 @@ function LeadsView() {
                             disabled={modoSoloLectura}
                             className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-600 disabled:border-transparent appearance-none transition-all"
                           >
-                            {estatusList.map((est) => (
+                            {estatusList
+                              .filter((est) => {
+                                if (est.codigo !== CODIGO_ENVIADO_A_FLISING) return true;
+                                return String(formData.estatus_id) === String(est.id);
+                              })
+                              .map((est) => (
                               <option key={est.id} value={est.id}>
                                 {est.nombre}
                               </option>
@@ -1341,6 +1418,15 @@ function LeadsView() {
                             onDescargarPdf={handleDescargarInformeGrouer}
                             descargandoPdf={descargandoPdfGrouer}
                             errorPdf={errorPdfGrouer}
+                            onEnviarFlising={
+                              !esLeadCancelado(leadEditando)
+                                ? () => abrirModalEnvioFlising(leadEditando)
+                                : undefined
+                            }
+                            enviandoFlising={enviandoFlising}
+                            yaEnviado={leadYaEnviadoAFlising(leadEditando, detalleGrouer)}
+                            agenteFlisingNombre={nombreAgenteFlisingAsignado(leadEditando, detalleGrouer)}
+                            errorEnvio={errorEnvioFlising}
                           />
                         )}
                       </>
@@ -1643,6 +1729,68 @@ function LeadsView() {
         onGenerarPdf={handleGenerarPdf}
         generandoPdf={generandoPdf}
       />
+
+      {envioFlisingLead && createPortal(
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[120] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 border border-slate-100">
+            <h2 className="text-lg font-extrabold text-slate-900">Enviar a Flising</h2>
+            <p className="text-slate-600 text-sm mt-2 leading-relaxed">
+              ¿A quién (de los agentes de FLISING) se va a asignar este prospecto?
+              Se creará una copia en el primer bin de FLISING; este lead GROUER se queda donde está.
+            </p>
+            <p className="text-sm font-bold text-slate-800 mt-4 truncate" title={envioFlisingLead.nombre}>
+              {envioFlisingLead.nombre || 'Prospecto GROUER'}
+            </p>
+            {errorEnvioFlising && (
+              <p className="mt-3 text-xs font-medium text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {errorEnvioFlising}
+              </p>
+            )}
+            {cargandoAgentesFlising ? null : agentesFlising.length === 0 && !errorEnvioFlising ? (
+              <p className="mt-3 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                No hay agentes en la empresa FLISING. Revisa FLISING_EMPRESA_ID y que existan usuarios con rol agente, supervisor o admin.
+              </p>
+            ) : null}
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mt-5 mb-2">
+              Agente FLISING
+            </label>
+            <select
+              value={agenteFlisingElegido}
+              onChange={(e) => setAgenteFlisingElegido(e.target.value)}
+              disabled={cargandoAgentesFlising || enviandoFlising}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-sky-500 font-medium text-slate-800 disabled:text-slate-500"
+            >
+              <option value="">
+                {cargandoAgentesFlising ? 'Cargando agentes…' : 'Selecciona un agente'}
+              </option>
+              {agentesFlising.map((agente) => (
+                <option key={agente.id} value={agente.id}>
+                  {agente.nombre} ({String(agente.rol || '').replace('_', ' ')})
+                </option>
+              ))}
+            </select>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={cerrarModalEnvioFlising}
+                disabled={enviandoFlising}
+                className="flex-1 py-3 rounded-xl font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarEnvioFlising}
+                disabled={enviandoFlising || !agenteFlisingElegido || cargandoAgentesFlising}
+                className="flex-1 py-3 rounded-xl font-bold bg-sky-600 text-white hover:bg-sky-500 disabled:opacity-50"
+              >
+                {enviandoFlising ? 'Enviando…' : 'Enviar'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {mostrarAvisoCancelacion && createPortal(
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
