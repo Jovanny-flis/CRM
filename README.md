@@ -510,7 +510,7 @@ Router `lib/integraciones-grouer.js`. Empresa siempre = `GROUER_EMPRESA_ID` (no 
 
 | Método | Endpoint | Protección | Descripción |
 | ------ | -------- | ---------- | ----------- |
-| POST | `/integraciones/grouer/prospectos` | `verificarTokenGrouer` | Alta inbound. 201 creado / 200 duplicado. |
+| POST | `/integraciones/grouer/prospectos` | `verificarTokenGrouer` | Alta inbound. 201 creado / 200 duplicado. Body opcional `agente.email`: si coincide con un usuario de la empresa GROUER, `leads.usuario_id` y `leads_origen_grouer.origen_usuario_id` apuntan a esa persona. Sin correo o sin coincidencia (aunque el correo exista en otra empresa) el lead queda en «Sistema GROUER» y el alta no falla. Canal siempre «Portal GROUER». Reasignar `usuario_id` no borra `origen_usuario_id`. Requiere migración `v007`. |
 | POST | `/integraciones/grouer/prospectos/:solicitud_id/cancelar` | `verificarTokenGrouer` | Si no hay lead: 200 `{ ok, existia: false }` (no-op). Si existe: estatus `cancelado`, motivo `canceló en portal`, `activo` legado = 0. Idempotente si ya estaba cancelado. UUID inválido → 400. No crea lead ni toca cotizaciones. |
 
 **Red Docker `grouer-crm` (prod):** crear **antes** del compose up si no existe (`sudo docker network create grouer-crm`). El compose de `CRM/deploy/` ya publica el backend con alias `crm-backend`. No editar compose solo en el servidor. No `down -v`.
