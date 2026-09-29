@@ -62,6 +62,22 @@ const enteroOSinDato = (valor) => {
   return n === null ? SIN_DATO : formatearNumero(n, { enteros: true });
 };
 
+/** deal.num_unidades y, si no viene, activo.num_unidades. Si ninguno viene, 1. */
+const numeroDeUnidades = (deal, activo) => {
+  const desdeDeal = numeroFinito(deal.num_unidades);
+  if (desdeDeal !== null) return desdeDeal;
+  const desdeActivo = numeroFinito(activo.num_unidades);
+  if (desdeActivo !== null) return desdeActivo;
+  return 1;
+};
+
+/** valor_unitario y, si no viene, el valor total que mandó GROUER. */
+const valorUnitarioDeal = (deal) => {
+  const unitario = numeroFinito(deal.valor_unitario);
+  if (unitario !== null) return unitario;
+  return numeroFinito(deal.valor_activo);
+};
+
 const numeroOSinDato = (valor) => {
   const n = numeroFinito(valor);
   return n === null ? SIN_DATO : formatearNumero(n);
@@ -213,7 +229,9 @@ export function construirFilasDetalleProspectoGrouer(snapshot) {
       id: 'deal',
       titulo: 'Deal',
       filas: [
-        fila('Valor activo', monedaOSinDato(deal.valor_activo), { destacado: true, ancho: 'full' }),
+        fila('Número de unidades', enteroOSinDato(numeroDeUnidades(deal, activo))),
+        fila('Valor unitario', monedaOSinDato(valorUnitarioDeal(deal))),
+        fila('Valor total', monedaOSinDato(deal.valor_activo), { destacado: true, ancho: 'full' }),
         fila('Pago inicial', monedaOSinDato(deal.pago_inicial)),
         fila('Enganche', fraccionAPct(deal.enganche_pct)),
         fila('Monto financiado', monedaOSinDato(deal.monto_financiado), { ancho: 'full' }),
