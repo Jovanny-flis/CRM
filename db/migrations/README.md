@@ -14,6 +14,7 @@ Ejecutar **una vez** (re-ejecutable sin error):
 mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/schema-v2.sql
 mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/v005_leads_origen_grouer.sql
 mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/v006_envio_flising.sql
+mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/v007_origen_agente_grouer.sql
 ```
 
 **DBeaver / clientes gráficos:** usar **Execute SQL Script** (Alt+X), no **Execute SQL Statement** (Ctrl+Enter). El archivo incluye `DELIMITER`, procedimientos almacenados y varios bloques DDL; ejecutar solo la línea bajo el cursor no crea tablas como `lead_etapas_historial`.
@@ -35,14 +36,16 @@ SHOW TABLES LIKE 'leads_origen_grouer';
 | `schema-v2.sql` | Única migración acumulada v2: canales, estatus de prospectos (**`pendiente_autorizacion`**), columnas de cancelación en `leads`, tabla `lead_etapas_historial`, activo automotriz en `cotizaciones`, **§10** parámetros del cotizador y **§13** cotización especial (`es_especial`, `autorizacion_estado`). |
 | `v005_leads_origen_grouer.sql` | Tabla hija `leads_origen_grouer` (snapshot curado del alta GROUER; UNIQUE `solicitud_id`). Idempotente (`CREATE TABLE IF NOT EXISTS`). |
 | `v006_envio_flising.sql` | Columnas de trazabilidad en `leads_origen_grouer` (`flising_lead_id`, `enviado_a_flising_at`, `asignado_flising_usuario_id`). Idempotente vía `INFORMATION_SCHEMA` (MySQL 8+ / MariaDB). |
+| `v007_origen_agente_grouer.sql` | `agente_email` y `origen_usuario_id` en `leads_origen_grouer`. El origen se fija en el alta y no se reescribe al reasignar. Idempotente. No hace backfill. |
 
 Las migraciones parciales `v001`–`v004` fueron retiradas; su contenido está unificado en `schema-v2.sql`.
 
-Aplicar v005 y v006 sobre una base que ya tiene `schema-v2.sql`:
+Aplicar v005, v006 y v007 sobre una base que ya tiene `schema-v2.sql`:
 
 ```bash
 mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/v005_leads_origen_grouer.sql
 mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/v006_envio_flising.sql
+mysql -h HOST -u USER -p NOMBRE_BD < db/migrations/v007_origen_agente_grouer.sql
 ```
 
 ## Runtime (complemento)
