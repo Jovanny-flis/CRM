@@ -1075,10 +1075,26 @@ const CotizadorView = () => {
                   <ToggleBtn flag={formData.isSeguroContado} onClick={() => setFormData({...formData, isSeguroContado: true})} label="Contado" />
                   <ToggleBtn flag={!formData.isSeguroContado} onClick={() => setFormData({...formData, isSeguroContado: false})} label="Financiado" />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 mb-2">
                   <ToggleBtn flag={formData.isSeguroAnual} onClick={() => setFormData({...formData, isSeguroAnual: true})} label="Anual" />
                   <ToggleBtn flag={!formData.isSeguroAnual} onClick={() => setFormData({...formData, isSeguroAnual: false})} label="Multianual" />
                 </div>
+                {!formData.isSeguroContado && (
+                  <div className="mt-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      Tasa del seguro (%)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={formData.tasaSeguro}
+                      onChange={(e) => setFormData({ ...formData, tasaSeguro: filtrarDecimalEnFormulario(e.target.value) })}
+                      placeholder={`Igual a la tasa general (${formData.tasaAnual || '—'}%)`}
+                      className={`w-full bg-white border rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.tasaSeguro ? 'border-red-500' : 'border-slate-200'}`}
+                    />
+                    {errores.tasaSeguro && <p className="text-red-500 text-xs mt-1">{errores.tasaSeguro}</p>}
+                  </div>
+                )}
               </div>
               
               <div className={formData.tipoArrendamiento !== 'Automotriz' ? 'opacity-60' : ''}>
@@ -1134,6 +1150,22 @@ const CotizadorView = () => {
                     label="Financiado"
                   />
                 </div>
+                {formData.tipoArrendamiento === 'Automotriz' && !formData.isGpsContado && (
+                  <div className="mt-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      Tasa del GPS (%)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={formData.tasaGps}
+                      onChange={(e) => setFormData({ ...formData, tasaGps: filtrarDecimalEnFormulario(e.target.value) })}
+                      placeholder={`Igual a la tasa general (${formData.tasaAnual || '—'}%)`}
+                      className={`w-full bg-white border rounded-xl px-4 py-2 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all ${errores.tasaGps ? 'border-red-500' : 'border-slate-200'}`}
+                    />
+                    {errores.tasaGps && <p className="text-red-500 text-xs mt-1">{errores.tasaGps}</p>}
+                  </div>
+                )}
               </div>
             </div>
 

@@ -92,6 +92,8 @@ export const formDataCotizadorVacio = () => ({
   valorActivo: '',
   plazo: '36',
   tasaAnual: '18',
+  tasaGps: '',
+  tasaSeguro: '',
   pagoInicial: '',
   isPagoInicialPct: true,
   residual: '',
@@ -146,6 +148,8 @@ export const cotizacionAFormData = (cot, { paraReplicar = false } = {}) => {
     valorActivo: cot.valor_activo != null ? formatMontoEnFormulario(String(cot.valor_activo)) : '',
     plazo: cot.plazo != null ? String(cot.plazo) : base.plazo,
     tasaAnual: tieneParametros ? numeroAString(cot.tasa_anual) : base.tasaAnual,
+    tasaGps: tieneParametros && cot.tasa_gps != null ? numeroAString(cot.tasa_gps) : '',
+    tasaSeguro: tieneParametros && cot.tasa_seguro != null ? numeroAString(cot.tasa_seguro) : '',
     pagoInicial: tieneParametros && cot.pago_inicial_valor != null
       ? numeroAString(cot.pago_inicial_valor)
       : '',
@@ -242,6 +246,8 @@ export const formDataAPayloadCotizacion = (formData, res, { empresaId, usuarioId
     plazo: parseInt(formData.plazo, 10),
     tipo_renta: 'Vencida',
     tasa_anual: parseFloat(formData.tasaAnual) || 0,
+    tasa_gps: formData.tasaGps !== '' && formData.tasaGps != null ? (parseFloat(formData.tasaGps) || null) : null,
+    tasa_seguro: formData.tasaSeguro !== '' && formData.tasaSeguro != null ? (parseFloat(formData.tasaSeguro) || null) : null,
     pago_inicial_valor: parseNumeroFormulario(formData.pagoInicial),
     is_pago_inicial_pct: formData.isPagoInicialPct ? 1 : 0,
     residual_valor: parseNumeroFormulario(formData.residual),
