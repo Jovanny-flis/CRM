@@ -120,7 +120,11 @@ export function construirFilasDetalleCotizacion(cot) {
     {
       etiqueta: 'Seguro',
       valor: cot.seguro_valor != null
-        ? `${formatoMonedaCotizacion(cot.seguro_valor)} (${etiquetaModoSeguro(cot)})`
+        ? `${formatoMonedaCotizacion(cot.seguro_valor)} (${etiquetaModoSeguro(cot)}${
+            !boolDesdeBd(cot.is_seguro_contado, true) && cot.tasa_seguro != null
+              ? `, tasa ${Number(cot.tasa_seguro)}%`
+              : ''
+          })`
         : '—',
       ancho: 'full',
     },
@@ -131,7 +135,11 @@ export function construirFilasDetalleCotizacion(cot) {
       {
         etiqueta: 'GPS',
         valor: cot.gps_valor != null && Number(cot.gps_valor) !== 0
-          ? `${formatoMonedaCotizacion(cot.gps_valor)} (${etiquetaModoGps(cot)})`
+          ? `${formatoMonedaCotizacion(cot.gps_valor)} (${etiquetaModoGps(cot)}${
+              !boolDesdeBd(cot.is_gps_contado, true) && cot.tasa_gps != null
+                ? `, tasa ${Number(cot.tasa_gps)}%`
+                : ''
+            })`
           : '—',
       },
       {
